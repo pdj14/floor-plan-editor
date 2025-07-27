@@ -95,6 +95,13 @@ const initThreeJS = () => {
   const container = canvas3dContainer.value
   const width = container.clientWidth
   const height = container.clientHeight
+  
+  console.log('📐 컨테이너 크기:', width, 'x', height)
+  
+  if (width === 0 || height === 0) {
+    console.warn('⚠️ 컨테이너 크기가 0입니다. CSS 스타일을 확인해주세요.')
+    return
+  }
 
   // 씬 생성
   scene = new THREE.Scene()
@@ -120,24 +127,62 @@ const initThreeJS = () => {
   renderer.shadowMap.enabled = false
   // renderer.shadowMap.type = THREE.PCFSoftShadowMap -> 제거됨
 
-  // 컨트롤 설정 (자연스러운 조작을 위해 수정)
+  // 🎮 카메라 컨트롤 설정 (마우스 조작 최적화)
   controls = new OrbitControls(camera, renderer.domElement)
+  
+  // 기본 설정
   controls.enableDamping = true
   controls.dampingFactor = 0.25
+  
+  // 카메라 각도 제한
   controls.maxPolarAngle = Math.PI / 2 // 지면 아래로 볼 수 없도록 제한
   controls.minPolarAngle = 0 // 위쪽 제한
-  controls.target.set(0, 0, 0)  // 원점을 중심으로 회전
+  controls.target.set(0, 0, 0)  // 초기 타겟
   
-  // 마우스 조작을 자연스럽게 만들기 위한 설정
-  controls.screenSpacePanning = false  // 화면 공간 패닝 비활성화
+  // 🖱️ 마우스 조작 설정
+  controls.screenSpacePanning = true  // 화면 공간 패닝 활성화 (더 직관적)
   controls.enablePan = true  // 패닝 활성화
   controls.enableZoom = true  // 줌 활성화
   controls.enableRotate = true  // 회전 활성화
   
-  // 회전 속도 조정 (필요시)
+  // 마우스 버튼 매핑 설정 (요청사항에 맞게)
+  controls.mouseButtons = {
+    LEFT: THREE.MOUSE.ROTATE,    // 좌클릭: 회전
+    MIDDLE: THREE.MOUSE.DOLLY,   // 중간버튼: 줌
+    RIGHT: THREE.MOUSE.PAN       // 우클릭: 이동
+  }
+  
+  // 컨트롤 속도 최적화
   controls.rotateSpeed = 1.0
-  controls.zoomSpeed = 1.2
-  controls.panSpeed = 0.8
+  controls.zoomSpeed = 1.5
+  controls.panSpeed = 1.2
+  
+  // 카메라 이동 범위 설정
+  controls.maxDistance = 50  // 최대 줌 아웃 거리
+  controls.minDistance = 1   // 최소 줌 인 거리
+  
+  // 컨트롤 초기화 완료
+  controls.update()
+  
+  console.log('🎮 3D 카메라 컨트롤 활성화 완료:')
+  console.log('   🖱️ 좌클릭 + 드래그: 카메라 회전')
+  console.log('   🖱️ 우클릭 + 드래그: 카메라 이동')
+  console.log('   🔍 마우스 휠: 줌 인/아웃')
+  console.log('   📍 현재 카메라 위치:', camera.position.toArray())
+  
+  // 🧪 컨트롤 작동 테스트를 위한 이벤트 리스너
+  renderer.domElement.addEventListener('mousedown', (event) => {
+    console.log('🖱️ 마우스 다운:', event.button, '버튼')
+  })
+  
+  renderer.domElement.addEventListener('wheel', (event) => {
+    console.log('🔍 마우스 휠:', event.deltaY > 0 ? '줌 아웃' : '줌 인')
+  })
+  
+  // 컨트롤 이벤트 리스너
+  controls.addEventListener('change', () => {
+    console.log('🎮 컨트롤 변경됨 - 카메라 위치:', camera.position.toArray())
+  })
 
   // 조명 설정
   setupLights()
@@ -149,25 +194,29 @@ const initThreeJS = () => {
   animate()
 }
 
-// 조명 설정 (GLB 원본 색상이 잘 보이도록 균등한 조명)
+// 조명 설정 (GLB 원본 색상이 자연스럽게 보이도록 최적화)
 const setupLights = () => {
-  // 환경광 (균등하고 밝게 - GLB 원본 색상 보존)
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.7)
+  // 환경광 (GLB 원본 색상의 자연스러운 표현을 위한 균형잡힌 조명)
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.6) // GLB 원본 색상 보존을 위한 적절한 강도
   scene.add(ambientLight)
+  console.log('환경광 설정: 0.6 강도 (GLB 원본 색상 자연스러운 표현)')
 
-  // 방향광 (부드럽게 - 윤곽선 유지하되 과하지 않게)
-  const directionalLight = new THREE.DirectionalLight(0xffffff, 0.3)
+  // 방향광 (GLB 디테일과 입체감 유지)
+  const directionalLight = new THREE.DirectionalLight(0xffffff, 0.3) // 적당한 방향광으로 입체감 제공
   directionalLight.position.set(5, 8, 3)
   directionalLight.castShadow = false
   scene.add(directionalLight)
+  console.log('주 방향광 설정: 0.3 강도 (GLB 입체감 유지)')
 
-  // 추가 방향광 (반대쪽에서 - 그림자 최소화)
-  const fillLight = new THREE.DirectionalLight(0xffffff, 0.2)
+  // 보조 방향광 (그림자 완화, 색상 균등하게)
+  const fillLight = new THREE.DirectionalLight(0xffffff, 0.2) // 부드러운 보조광
   fillLight.position.set(-5, 5, -3)
   fillLight.castShadow = false
   scene.add(fillLight)
+  console.log('보조 방향광 설정: 0.2 강도 (그림자 완화)')
   
-  console.log('GLB 원본 색상 보존을 위한 부드러운 조명 설정 완료')
+  console.log('✅ GLB 원본 색상 자연스러운 표현을 위한 조명 설정 완료 (총 조명 강도: 1.1)')
+  console.log('🎨 GLB 파일의 원본 색상과 재질이 그대로 표현됩니다')
 }
 
 // 실시간 3D 업데이트 제거로 인해 addDefaultFloor 함수 비활성화
@@ -380,6 +429,10 @@ const updateWallHeight = () => {
   })
 }
 
+// ✅ 색상 처리 함수들 완전 제거 - GLB 원본 색상 100% 보존
+// 더 이상 색상을 인위적으로 변경하지 않습니다.
+// GLB 파일의 디자이너가 의도한 원본 색상과 재질을 그대로 사용합니다.
+
 // GLB 모델의 원본 재질 정보만 로그 출력 (변경하지 않음)
 const logOnlyOriginalMaterials = (model: any) => {
   let materialCount = 0
@@ -569,15 +622,25 @@ const updatePlacedObjectsIn3D = async (placedObjects: any[]) => {
 
   // 강제 렌더링 업데이트 (여러 방법 시도)
   if (renderer && camera) {
-    // 여러 번 렌더링 시도
-    renderer.render(scene, camera)
-    requestAnimationFrame(() => {
-      renderer.render(scene, camera)
-      console.log('✅ 3D 렌더링 업데이트 완료 (requestAnimationFrame)')
-    })
+    console.log(`🔍 카메라 위치: (${camera.position.x}, ${camera.position.y}, ${camera.position.z})`)
+    console.log(`🔍 카메라 타겟:`, controls?.target || 'No controls')
+    console.log(`🔍 Scene에 있는 placed-object 수: ${scene.children.filter(child => child.userData?.type === 'placed-object').length}`)
     
     // Scene 강제 업데이트
     scene.updateMatrixWorld(true)
+    
+    // 여러 번 렌더링 시도
+    renderer.render(scene, camera)
+    console.log('✅ 3D 첫 번째 렌더링 완료')
+    
+    requestAnimationFrame(() => {
+      renderer.render(scene, camera)
+      console.log('✅ 3D 두 번째 렌더링 완료 (requestAnimationFrame)')
+      
+      // 최종 상태 확인
+      const finalObjectCount = scene.children.filter(child => child.userData?.type === 'placed-object').length
+      console.log(`🔍 최종 렌더링 후 placed-object 수: ${finalObjectCount}`)
+    })
     
     console.log('✅ 3D 렌더링 업데이트 완료 (즉시)')
   } else {
@@ -646,19 +709,53 @@ const create3DObjects = async (placedObjects: any[]) => {
       })
 
       const model = gltf.scene.clone()
-      console.log(`${placedObj.name} 모델 복제 완료. 자식 수: ${model.children.length}`)
+      console.log(`🔍 ${placedObj.name} 모델 복제 완료. 자식 수: ${model.children.length}`)
+      console.log(`🔍 모델 바운딩박스:`, model)
       
       // GLB에서 주요 색상 추출
       extractedColor = extractPrimaryColor(model)
-      console.log(`${placedObj.name} 추출된 주요 색상: ${extractedColor}`)
+      console.log(`🔍 ${placedObj.name} 추출된 주요 색상: ${extractedColor}`)
       
-      // 색상 정보는 2D에서 직접 적용 (Store 업데이트 제거 - 무한루프 방지)
-      console.log(`💡 색상 정보: ${extractedColor} (Store 업데이트 생략 - 무한루프 방지)`)
+      // 모델이 실제로 로드되었는지 확인
+      let meshCount = 0
+      model.traverse((child) => {
+        if (child.isMesh) {
+          meshCount++
+          console.log(`🔍 Mesh ${meshCount}: ${child.name || 'Unnamed'}, geometry: ${child.geometry?.type}`)
+        }
+      })
+      console.log(`🔍 총 Mesh 개수: ${meshCount}`)
       
-      // GLB 모델의 원본 재질 완전 보존 (변경하지 않음)
-      console.log(`=== ${placedObj.name} GLB 원본 재질 보존 (변경 없음) ===`)
-      logOnlyOriginalMaterials(model)
-      console.log(`=== ${placedObj.name} 원본 재질 그대로 사용 완료 ===`)
+      // GLB 색상 강화 적용 (벽과 구분되도록)
+      console.log(`=== ${placedObj.name} GLB 색상 처리 시작 ===`)
+      logOnlyOriginalMaterials(model) // 원본 재질 로그
+      
+      // GLB 원본 색상과 재질 100% 보존 (변경 없음)
+      console.log(`🎨 GLB 원본 색상 완전 보존 - 인위적 색상 변경 없음`)
+      console.log(`✨ GLB 파일 그대로의 자연스러운 색상 사용`)
+      
+      // GLB 원본 재질 정보만 로그 (변경하지 않음)  
+      let preservedMaterialCount = 0
+      model.traverse((child: any) => {
+        if (child.isMesh && child.material) {
+          preservedMaterialCount++
+          if (Array.isArray(child.material)) {
+            child.material.forEach((mat: any, index: number) => {
+              if (mat.color) {
+                console.log(`  원본 재질[${index}] ${mat.type}: RGB(${mat.color.r.toFixed(3)}, ${mat.color.g.toFixed(3)}, ${mat.color.b.toFixed(3)}) - 변경 없음`)
+              }
+            })
+          } else {
+            if (child.material.color) {
+              console.log(`  원본 재질 ${child.material.type}: RGB(${child.material.color.r.toFixed(3)}, ${child.material.color.g.toFixed(3)}, ${child.material.color.b.toFixed(3)}) - 변경 없음`)
+            }
+          }
+        }
+      })
+      
+      console.log(`✅ ${preservedMaterialCount}개 재질의 GLB 원본 색상 완전 보존`)
+      
+      console.log(`=== ${placedObj.name} GLB 색상 처리 완료 ===`)
       
       // 모델 위치 설정 (벽과 완전히 동일한 좌표 변환)
       console.log(`${placedObj.name} Store 좌표: (${placedObj.position.x}, ${placedObj.position.y})`)
@@ -710,8 +807,16 @@ const create3DObjects = async (placedObjects: any[]) => {
         category: placedObj.category
       }
       
+      console.log(`🔍 Scene 추가 전 children 수: ${scene.children.length}`)
+      console.log(`🔍 모델 최종 위치: (${model.position.x}, ${model.position.y}, ${model.position.z})`)
+      console.log(`🔍 모델 최종 회전: (${model.rotation.x}, ${model.rotation.y}, ${model.rotation.z})`)
+      console.log(`🔍 모델 최종 스케일: (${model.scale.x}, ${model.scale.y}, ${model.scale.z})`)
+      
       scene.add(model)
-      console.log(`=== ${placedObj.name} 3D 씬에 추가 완료! ===`)
+      
+      console.log(`🔍 Scene 추가 후 children 수: ${scene.children.length}`)
+      console.log(`🔍 Scene children 타입들:`, scene.children.map(child => child.userData?.type || child.type))
+      console.log(`=== ✅ ${placedObj.name} 3D 씬에 추가 완료! ===`)
       
     } catch (error) {
       console.error(`❌ GLB 모델 로딩 실패 (${placedObj.name}):`, error)

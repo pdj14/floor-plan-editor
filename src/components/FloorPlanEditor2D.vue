@@ -275,7 +275,7 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
 // 캔버스 키보드 이벤트 처리
 const handleCanvasKeydown = (e: KeyboardEvent) => {
   if (e.key === 'Delete') {
-    e.preventDefault()
+      e.preventDefault()
     deleteSelectedObject()
   }
 }
@@ -463,12 +463,12 @@ const updateInteriorWallInList = (modifiedWall: any) => {
     return
   }
   
-  const updatedWall = {
+    const updatedWall = {
     start: { x: startPoint.x, y: startPoint.y },
     end: { x: endPoint.x, y: endPoint.y },
-    id: wallId
-  }
-  
+      id: wallId
+    }
+    
   if (wallType === 'interior-wall') {
     floorplanStore.updateInteriorWall(wallId, updatedWall)
   } else if (wallType === 'exterior-wall') {
@@ -688,7 +688,7 @@ const createRoom = () => {
       bottom: startY + roomHeightPx
     }
   }
-  
+
   floorplanStore.setRoom(roomData)
   
   // Store에 외부벽들도 추가
@@ -721,7 +721,7 @@ const createRoom = () => {
   exteriorWallData.forEach(wallData => {
     floorplanStore.addExteriorWall(wallData)
   })
-  
+
   fabricCanvas.renderAll()
   
   // 외부벽에도 길이 표시 추가 (Line 좌표 사용)
@@ -1028,7 +1028,7 @@ const updatePlacedObjectInStore = (fabricObject: any) => {
   const placedObjectId = fabricObject.userData.placedObjectId
   const canvasWidth = fabricCanvas?.width || 800
   const canvasHeight = fabricCanvas?.height || 600
-  
+
   // Fabric.js 좌표를 3D 월드 좌표로 변환 (벽과 동일한 방식)
   const worldX = (fabricObject.left - canvasWidth / 2) / 40   // X축 좌표
   const worldY = (fabricObject.top - canvasHeight / 2) / 40   // Y축 좌표 (벽과 동일한 방식)
@@ -1319,7 +1319,7 @@ const deleteSelectedObject = () => {
     )
     
     wallsToRemove.forEach((wall: any) => {
-      fabricCanvas.remove(wall)
+    fabricCanvas.remove(wall)
     })
 
     // Store에서 벽 제거
