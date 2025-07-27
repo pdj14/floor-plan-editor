@@ -115,17 +115,25 @@ const initThreeJS = () => {
   camera.lookAt(0, 0, 0)
   // camera.up 설정을 기본값(0, 1, 0)으로 유지
 
-  // 렌더러 생성
+  // 렌더러 생성 (GLB 색상 정확한 표현을 위한 최적화)
   renderer = new THREE.WebGLRenderer({ 
     canvas: canvas3d.value,
     antialias: true,
-    alpha: true
+    alpha: true,
+    preserveDrawingBuffer: false,
+    powerPreference: "high-performance"
   })
   renderer.setSize(width, height)
-  renderer.setPixelRatio(window.devicePixelRatio)
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)) // 성능 최적화
+  renderer.outputColorSpace = THREE.SRGBColorSpace // GLB 색상 정확한 표현
+  renderer.toneMapping = THREE.NoToneMapping // 톤매핑 비활성화로 원본 색상 보존
+  renderer.toneMappingExposure = 1.0
+  
   // 그림자 효과 제거됨 - 사용자 요청에 따라
   renderer.shadowMap.enabled = false
   // renderer.shadowMap.type = THREE.PCFSoftShadowMap -> 제거됨
+  
+  console.log('🎨 GLB 색상 정확한 표현을 위한 렌더러 설정 완료')
 
   // 🎮 카메라 컨트롤 설정 (마우스 조작 최적화)
   controls = new OrbitControls(camera, renderer.domElement)
@@ -179,10 +187,6 @@ const initThreeJS = () => {
     console.log('🔍 마우스 휠:', event.deltaY > 0 ? '줌 아웃' : '줌 인')
   })
   
-  // 컨트롤 이벤트 리스너
-  controls.addEventListener('change', () => {
-    console.log('🎮 컨트롤 변경됨 - 카메라 위치:', camera.position.toArray())
-  })
 
   // 조명 설정
   setupLights()
@@ -194,30 +198,31 @@ const initThreeJS = () => {
   animate()
 }
 
-// 조명 설정 (GLB 원본 색상이 자연스럽게 보이도록 최적화)
-const setupLights = () => {
-  // 환경광 (GLB 원본 색상의 자연스러운 표현을 위한 균형잡힌 조명)
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.6) // GLB 원본 색상 보존을 위한 적절한 강도
-  scene.add(ambientLight)
-  console.log('환경광 설정: 0.6 강도 (GLB 원본 색상 자연스러운 표현)')
+  // 조명 설정 (하얀색이 완전히 밝게 보이도록 극한 조명)
+  const setupLights = () => {
+    // 환경광 (하얀색이 완전히 밝게 보이도록 극한 환경광)
+    const ambientLight = new THREE.AmbientLight(0xffffff, 2.0) // 하얀색 완전 밝은 표현을 위한 극한 환경광
+    scene.add(ambientLight)
+    console.log('환경광 설정: 2.0 강도 (하얀색 완전 밝은 표현)')
 
-  // 방향광 (GLB 디테일과 입체감 유지)
-  const directionalLight = new THREE.DirectionalLight(0xffffff, 0.3) // 적당한 방향광으로 입체감 제공
-  directionalLight.position.set(5, 8, 3)
-  directionalLight.castShadow = false
-  scene.add(directionalLight)
-  console.log('주 방향광 설정: 0.3 강도 (GLB 입체감 유지)')
+    // 주 방향광 (하얀색이 완전히 밝게 보이도록 극한 방향광)
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5) // 하얀색을 완전히 밝게 보이게 하는 극한 방향광
+    directionalLight.position.set(5, 8, 3)
+    directionalLight.castShadow = false
+    scene.add(directionalLight)
+    console.log('주 방향광 설정: 1.5 강도 (하얀색 완전 밝은 표현)')
 
-  // 보조 방향광 (그림자 완화, 색상 균등하게)
-  const fillLight = new THREE.DirectionalLight(0xffffff, 0.2) // 부드러운 보조광
-  fillLight.position.set(-5, 5, -3)
-  fillLight.castShadow = false
-  scene.add(fillLight)
-  console.log('보조 방향광 설정: 0.2 강도 (그림자 완화)')
-  
-  console.log('✅ GLB 원본 색상 자연스러운 표현을 위한 조명 설정 완료 (총 조명 강도: 1.1)')
-  console.log('🎨 GLB 파일의 원본 색상과 재질이 그대로 표현됩니다')
-}
+    // 보조 방향광 (하얀색 균등 극한 조명)
+    const fillLight = new THREE.DirectionalLight(0xffffff, 1.0) // 하얀색 균등 극한 조명
+    fillLight.position.set(-5, 5, -3)
+    fillLight.castShadow = false
+    scene.add(fillLight)
+    console.log('보조 방향광 설정: 1.0 강도 (하얀색 균등 극한 조명)')
+    
+    console.log('✅ 하얀색 완전 밝은 표현을 위한 극한 조명 설정 완료 (총 조명 강도: 4.5)')
+    console.log('🎨 하얀색이 완전히 밝게 보입니다')
+    console.log('💡 극한 조명 강도로 색상 완전 표현')
+  }
 
 // 실시간 3D 업데이트 제거로 인해 addDefaultFloor 함수 비활성화
 // Make3D 버튼으로만 바닥 생성
@@ -261,17 +266,15 @@ const create3DWalls = (wallsData: any) => {
   const canvasWidth = wallsData.canvasSize?.width || 800
   const canvasHeight = wallsData.canvasSize?.height || 600
 
-  // 외벽 생성 (2D와 동일한 색상: #999999)
   if (wallsData.exteriorWalls) {
     wallsData.exteriorWalls.forEach((wall: any, index: number) => {
-      createWall(wall, 'exterior-wall', 0xffffff, canvasWidth, canvasHeight, false)
+      createWall(wall, 'exterior-wall', 0xd3d3d3, canvasWidth, canvasHeight, false)
     })
   }
 
-  // 내벽 생성 (2D와 동일한 색상: #666666)
   if (wallsData.interiorWalls) {
     wallsData.interiorWalls.forEach((wall: any, index: number) => {
-      createWall(wall, 'interior-wall', 0xffffff, canvasWidth, canvasHeight, false)
+      createWall(wall, 'interior-wall', 0xd3d3d3, canvasWidth, canvasHeight, false)
     })
   }
 }
@@ -395,7 +398,7 @@ const resetCamera = () => {
 
 const toggleWireframe = () => {
   wireframe.value = !wireframe.value
-  scene.traverse((object) => {
+  scene.traverse((object) => {ㅋ
     if (object instanceof THREE.Mesh && object.material instanceof THREE.Material) {
       object.material.wireframe = wireframe.value
     }
@@ -730,30 +733,41 @@ const create3DObjects = async (placedObjects: any[]) => {
       console.log(`=== ${placedObj.name} GLB 색상 처리 시작 ===`)
       logOnlyOriginalMaterials(model) // 원본 재질 로그
       
-      // GLB 원본 색상과 재질 100% 보존 (변경 없음)
-      console.log(`🎨 GLB 원본 색상 완전 보존 - 인위적 색상 변경 없음`)
-      console.log(`✨ GLB 파일 그대로의 자연스러운 색상 사용`)
+      // GLB 원본 색상 강제 적용 (추출된 색상으로 명시적 설정)
+      console.log(`🎨 GLB 추출 색상 강제 적용: ${extractedColor}`)
+      console.log(`✨ 추출된 색상을 모든 재질에 명시적으로 적용`)
       
-      // GLB 원본 재질 정보만 로그 (변경하지 않음)  
-      let preservedMaterialCount = 0
+      // GLB 추출 색상을 모든 재질에 강제 적용
+      let appliedMaterialCount = 0
+      const extractedColorRGB = new THREE.Color(extractedColor)
+      
       model.traverse((child: any) => {
         if (child.isMesh && child.material) {
-          preservedMaterialCount++
+          appliedMaterialCount++
+          
           if (Array.isArray(child.material)) {
             child.material.forEach((mat: any, index: number) => {
-              if (mat.color) {
-                console.log(`  원본 재질[${index}] ${mat.type}: RGB(${mat.color.r.toFixed(3)}, ${mat.color.g.toFixed(3)}, ${mat.color.b.toFixed(3)}) - 변경 없음`)
-              }
+              console.log(`  재질[${index}] ${mat.type}: 원본 RGB(${mat.color?.r.toFixed(3) || 'N/A'}, ${mat.color?.g.toFixed(3) || 'N/A'}, ${mat.color?.b.toFixed(3) || 'N/A'})`)
+              
+              // 추출된 색상으로 강제 적용
+              mat.color = extractedColorRGB.clone()
+              mat.needsUpdate = true
+              
+              console.log(`  → 적용된 색상: ${extractedColor} (RGB: ${extractedColorRGB.r.toFixed(3)}, ${extractedColorRGB.g.toFixed(3)}, ${extractedColorRGB.b.toFixed(3)})`)
             })
           } else {
-            if (child.material.color) {
-              console.log(`  원본 재질 ${child.material.type}: RGB(${child.material.color.r.toFixed(3)}, ${child.material.color.g.toFixed(3)}, ${child.material.color.b.toFixed(3)}) - 변경 없음`)
-            }
+            console.log(`  재질 ${child.material.type}: 원본 RGB(${child.material.color?.r.toFixed(3) || 'N/A'}, ${child.material.color?.g.toFixed(3) || 'N/A'}, ${child.material.color?.b.toFixed(3) || 'N/A'})`)
+            
+            // 추출된 색상으로 강제 적용
+            child.material.color = extractedColorRGB.clone()
+            child.material.needsUpdate = true
+            
+            console.log(`  → 적용된 색상: ${extractedColor} (RGB: ${extractedColorRGB.r.toFixed(3)}, ${extractedColorRGB.g.toFixed(3)}, ${extractedColorRGB.b.toFixed(3)})`)
           }
         }
       })
       
-      console.log(`✅ ${preservedMaterialCount}개 재질의 GLB 원본 색상 완전 보존`)
+      console.log(`✅ ${appliedMaterialCount}개 재질에 추출 색상 ${extractedColor} 강제 적용 완료`)
       
       console.log(`=== ${placedObj.name} GLB 색상 처리 완료 ===`)
       

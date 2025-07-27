@@ -249,6 +249,30 @@ const defaultObjects: GameObject[] = [
     width: 1.2,
     depth: 1.0,
     height: 2.0
+  },
+  {
+    id: 'default-robot-arm',
+    name: 'Robot Arm',
+    category: 'robot',
+    glbUrl: '/robotArm.glb',
+    thumbnail: '/로봇팔.png',
+    description: '산업용 로봇 팔',
+    size: '0.8m × 0.8m × 0.8m',
+    width: 0.8,
+    depth: 0.8,
+    height: 0.8
+  },
+  {
+    id: 'default-txi-equipment',
+    name: 'TXI',
+    category: 'equipment',
+    glbUrl: '/txi.glb',
+    thumbnail: '/설비.png',
+    description: 'TXI 설비',
+    size: '5.0m × 3.0m × 1.0m',
+    width: 5.0,
+    depth: 3.0,
+    height: 1.0
   }
 ]
 
