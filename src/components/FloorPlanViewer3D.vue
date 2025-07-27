@@ -61,7 +61,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
@@ -149,24 +149,25 @@ const initThreeJS = () => {
   animate()
 }
 
-// 조명 설정
+// 조명 설정 (GLB 원본 색상이 잘 보이도록 균등한 조명)
 const setupLights = () => {
-  // 환경광 (더 밝게 조정)
-  const ambientLight = new THREE.AmbientLight(0x404040, 0.8)
+  // 환경광 (균등하고 밝게 - GLB 원본 색상 보존)
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.7)
   scene.add(ambientLight)
 
-  // 방향광 (그림자 품질 향상)
-  const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6)
-  directionalLight.position.set(10, 10, 5)
-  // 그림자 효과 제거됨
+  // 방향광 (부드럽게 - 윤곽선 유지하되 과하지 않게)
+  const directionalLight = new THREE.DirectionalLight(0xffffff, 0.3)
+  directionalLight.position.set(5, 8, 3)
   directionalLight.castShadow = false
-  // directionalLight.shadow 설정들 제거됨
   scene.add(directionalLight)
 
-  // 포인트 라이트 (실내 조명)
-  const pointLight = new THREE.PointLight(0xffffff, 0.4, 20)
-  pointLight.position.set(0, 3, 0)
-  scene.add(pointLight)
+  // 추가 방향광 (반대쪽에서 - 그림자 최소화)
+  const fillLight = new THREE.DirectionalLight(0xffffff, 0.2)
+  fillLight.position.set(-5, 5, -3)
+  fillLight.castShadow = false
+  scene.add(fillLight)
+  
+  console.log('GLB 원본 색상 보존을 위한 부드러운 조명 설정 완료')
 }
 
 // 실시간 3D 업데이트 제거로 인해 addDefaultFloor 함수 비활성화
@@ -214,14 +215,14 @@ const create3DWalls = (wallsData: any) => {
   // 외벽 생성 (2D와 동일한 색상: #999999)
   if (wallsData.exteriorWalls) {
     wallsData.exteriorWalls.forEach((wall: any, index: number) => {
-      createWall(wall, 'exterior-wall', 0x999999, canvasWidth, canvasHeight, false)
+      createWall(wall, 'exterior-wall', 0xffffff, canvasWidth, canvasHeight, false)
     })
   }
 
   // 내벽 생성 (2D와 동일한 색상: #666666)
   if (wallsData.interiorWalls) {
     wallsData.interiorWalls.forEach((wall: any, index: number) => {
-      createWall(wall, 'interior-wall', 0x666666, canvasWidth, canvasHeight, false)
+      createWall(wall, 'interior-wall', 0xffffff, canvasWidth, canvasHeight, false)
     })
   }
 }
@@ -379,25 +380,394 @@ const updateWallHeight = () => {
   })
 }
 
+// GLB 모델의 원본 재질 정보만 로그 출력 (변경하지 않음)
+const logOnlyOriginalMaterials = (model: any) => {
+  let materialCount = 0
+  
+  model.traverse((child: any) => {
+    if (child.isMesh && child.material) {
+      materialCount++
+      console.log(`Mesh 발견: ${child.name || `Mesh${materialCount}`}`)
+      
+      if (Array.isArray(child.material)) {
+        // 배열인 경우 각 재질 정보 로그
+        child.material.forEach((mat: any, index: number) => {
+          console.log(`  재질 배열[${index}]: ${mat.type}`)
+          logOriginalMaterialColor(mat, index)
+          console.log(`    → 원본 재질 보존됨 (변경 없음)`)
+        })
+      } else {
+        // 단일 재질인 경우
+        console.log(`  단일 재질: ${child.material.type}`)
+        logOriginalMaterialColor(child.material, 0)
+        console.log(`    → 원본 재질 보존됨 (변경 없음)`)
+      }
+    }
+  })
+  
+  console.log(`총 ${materialCount}개 Mesh의 원본 재질을 그대로 사용`)
+}
+
+// 원본 재질 색상 로그
+const logOriginalMaterialColor = (material: any, index: number) => {
+  if (material.color) {
+    const r = Math.round(material.color.r * 255)
+    const g = Math.round(material.color.g * 255) 
+    const b = Math.round(material.color.b * 255)
+    console.log(`    → 원본 색상[${index}]: RGB(${r}, ${g}, ${b})`)
+  }
+  
+  // 재질 종류별 정보
+  if (material.isMeshStandardMaterial) {
+    console.log(`    → 표준 재질 (조명 효과 O, 텍스처 O, 깊이감 O)`)
+  } else if (material.isMeshPhysicalMaterial) {
+    console.log(`    → 물리 재질 (조명 효과 O, 고급 반사 O)`)
+  } else if (material.isMeshLambertMaterial) {
+    console.log(`    → 램버트 재질 (조명 효과 O, 기본)`)
+  }
+}
+
+// GLB에서 주요 색상 추출 함수
+const extractPrimaryColor = (model: any): string => {
+  const colors: { r: number, g: number, b: number, count: number }[] = []
+  
+  model.traverse((child: any) => {
+    if (child.isMesh && child.material) {
+      const materials = Array.isArray(child.material) ? child.material : [child.material]
+      
+      materials.forEach((mat: any) => {
+        if (mat.color) {
+          // 기존 색상이 있는지 확인 (유사한 색상 그룹화)
+          const existingColor = colors.find(c => 
+            Math.abs(c.r - mat.color.r) < 0.1 && 
+            Math.abs(c.g - mat.color.g) < 0.1 && 
+            Math.abs(c.b - mat.color.b) < 0.1
+          )
+          
+          if (existingColor) {
+            existingColor.count++
+          } else {
+            colors.push({
+              r: mat.color.r,
+              g: mat.color.g,
+              b: mat.color.b,
+              count: 1
+            })
+          }
+        }
+      })
+    }
+  })
+  
+  // 가장 많이 사용된 색상을 주요 색상으로 선택
+  if (colors.length === 0) {
+    return '#CCCCCC' // 기본 회색
+  }
+  
+  const primaryColor = colors.reduce((prev, current) => 
+    (prev.count > current.count) ? prev : current
+  )
+  
+  // RGB를 HEX로 변환
+  const r = Math.round(primaryColor.r * 255)
+  const g = Math.round(primaryColor.g * 255)
+  const b = Math.round(primaryColor.b * 255)
+  
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`
+}
+
+// GLB 재질 정보 로그 함수
+const logMaterialInfo = (material: any, name: string) => {
+  console.log(`  ${name}:`)
+  
+  // 기본 색상
+  if (material.color) {
+    console.log(`    - 기본 색상: RGB(${Math.round(material.color.r * 255)}, ${Math.round(material.color.g * 255)}, ${Math.round(material.color.b * 255)})`)
+  }
+  
+  // PBR 재질 속성들
+  if (material.isMeshStandardMaterial || material.isMeshPhysicalMaterial) {
+    if (material.emissive) {
+      console.log(`    - 발광 색상: RGB(${Math.round(material.emissive.r * 255)}, ${Math.round(material.emissive.g * 255)}, ${Math.round(material.emissive.b * 255)})`)
+    }
+    if (material.metalness !== undefined) {
+      console.log(`    - 금속성: ${material.metalness}`)
+    }
+    if (material.roughness !== undefined) {
+      console.log(`    - 거칠기: ${material.roughness}`)
+    }
+  }
+  
+  // 텍스처 정보
+  if (material.map) {
+    console.log(`    - 기본 텍스처: 있음`)
+  }
+  if (material.normalMap) {
+    console.log(`    - 노멀 맵: 있음`)
+  }
+  if (material.roughnessMap) {
+    console.log(`    - 거칠기 맵: 있음`)
+  }
+  if (material.metalnessMap) {
+    console.log(`    - 금속성 맵: 있음`)
+  }
+  
+  // 투명도
+  if (material.transparent && material.opacity !== undefined) {
+    console.log(`    - 투명도: ${material.opacity}`)
+  }
+}
+
+// 실시간 3D 오브젝트 업데이트 (Store 변경 감지용)
+const updatePlacedObjectsIn3D = async (placedObjects: any[]) => {
+  console.log('🔄 updatePlacedObjectsIn3D 실행 시작')
+  console.log('🔄 전달받은 placedObjects:', placedObjects)
+  
+  if (!scene) {
+    console.log('❌ Scene 없음')
+    return
+  }
+
+  // 기존 배치 오브젝트 모두 제거
+  const existingObjects = scene.children.filter(child => child.userData.type === 'placed-object')
+  console.log(`🗑️ 3D Scene에서 제거할 기존 오브젝트 개수: ${existingObjects.length}`)
+  
+  existingObjects.forEach((obj, index) => {
+    console.log(`🗑️ 제거 중 ${index + 1}/${existingObjects.length}: ${obj.userData.placedObjectId || obj.userData.id || 'unknown'}`)
+    console.log(`🗑️ userData 전체:`, obj.userData)
+    scene.remove(obj)
+    if (obj.traverse) {
+      obj.traverse((child: any) => {
+        if (child.geometry) child.geometry.dispose()
+        if (child.material) {
+          if (Array.isArray(child.material)) {
+            child.material.forEach((mat: any) => mat.dispose())
+          } else {
+            child.material.dispose()
+          }
+        }
+      })
+    }
+  })
+
+  console.log(`✅ 기존 오브젝트 ${existingObjects.length}개 제거 완료`)
+  
+  // Scene 상태 확인
+  const remainingObjects = scene.children.filter(child => child.userData.type === 'placed-object')
+  console.log(`🔍 제거 후 Scene에 남은 placed-object 개수: ${remainingObjects.length}`)
+  
+  console.log(`🔍 Scene 전체 children 개수: ${scene.children.length}`)
+  console.log(`🔍 Scene children 타입들:`, scene.children.map(child => child.userData.type || child.type))
+
+  // 새로운 오브젝트들 추가
+  if (placedObjects.length > 0) {
+    console.log(`📦 ${placedObjects.length}개 오브젝트 3D 업데이트 중...`)
+    await create3DObjects(placedObjects)
+  } else {
+    console.log('📦 모든 3D 오브젝트 제거됨 - 새로 추가할 오브젝트 없음')
+  }
+
+  // 강제 렌더링 업데이트 (여러 방법 시도)
+  if (renderer && camera) {
+    // 여러 번 렌더링 시도
+    renderer.render(scene, camera)
+    requestAnimationFrame(() => {
+      renderer.render(scene, camera)
+      console.log('✅ 3D 렌더링 업데이트 완료 (requestAnimationFrame)')
+    })
+    
+    // Scene 강제 업데이트
+    scene.updateMatrixWorld(true)
+    
+    console.log('✅ 3D 렌더링 업데이트 완료 (즉시)')
+  } else {
+    console.log('❌ renderer 또는 camera 없음')
+  }
+  
+  console.log('🔄 updatePlacedObjectsIn3D 실행 완료')
+}
+
+// 3D 오브젝트 생성 (GLB 모델 로딩)
+const create3DObjects = async (placedObjects: any[]) => {
+  console.log('🎯 create3DObjects 호출됨')
+  console.log('🎯 Scene 존재:', !!scene)
+  console.log('🎯 placedObjects:', placedObjects)
+  console.log('🎯 placedObjects 길이:', placedObjects?.length)
+  
+  if (!scene || !placedObjects || placedObjects.length === 0) {
+    console.log('❌ create3DObjects 중단: scene 없음 또는 오브젝트 없음')
+    return
+  }
+  
+  console.log('✅ create3DObjects 실행 시작')
+
+  // 기존 배치 오브젝트 제거
+  const existingObjects = scene.children.filter(child => child.userData.type === 'placed-object')
+  existingObjects.forEach(obj => {
+    scene.remove(obj)
+    if (obj.traverse) {
+      obj.traverse((child: any) => {
+        if (child.geometry) child.geometry.dispose()
+        if (child.material) {
+          if (Array.isArray(child.material)) {
+            child.material.forEach((mat: any) => mat.dispose())
+          } else {
+            child.material.dispose()
+          }
+        }
+      })
+    }
+  })
+
+  // GLTFLoader 사용하여 GLB 모델 로딩
+  const loader = new GLTFLoader()
+  
+  for (const placedObj of placedObjects) {
+    let extractedColor = '#CCCCCC' // 기본 색상
+    
+    try {
+      console.log(`=== ${placedObj.name} GLB 로딩 시작: ${placedObj.glbUrl} ===`)
+      
+      const gltf = await new Promise<any>((resolve, reject) => {
+        loader.load(
+          placedObj.glbUrl,
+          (gltf) => {
+            console.log(`${placedObj.name} GLB 로딩 성공!`)
+            resolve(gltf)
+          },
+          (progress) => {
+            console.log(`${placedObj.name} 로딩 진행률: ${(progress.loaded / progress.total * 100).toFixed(1)}%`)
+          },
+          (error) => {
+            console.error(`${placedObj.name} GLB 로딩 실패:`, error)
+            reject(error)
+          }
+        )
+      })
+
+      const model = gltf.scene.clone()
+      console.log(`${placedObj.name} 모델 복제 완료. 자식 수: ${model.children.length}`)
+      
+      // GLB에서 주요 색상 추출
+      extractedColor = extractPrimaryColor(model)
+      console.log(`${placedObj.name} 추출된 주요 색상: ${extractedColor}`)
+      
+      // 색상 정보는 2D에서 직접 적용 (Store 업데이트 제거 - 무한루프 방지)
+      console.log(`💡 색상 정보: ${extractedColor} (Store 업데이트 생략 - 무한루프 방지)`)
+      
+      // GLB 모델의 원본 재질 완전 보존 (변경하지 않음)
+      console.log(`=== ${placedObj.name} GLB 원본 재질 보존 (변경 없음) ===`)
+      logOnlyOriginalMaterials(model)
+      console.log(`=== ${placedObj.name} 원본 재질 그대로 사용 완료 ===`)
+      
+      // 모델 위치 설정 (벽과 완전히 동일한 좌표 변환)
+      console.log(`${placedObj.name} Store 좌표: (${placedObj.position.x}, ${placedObj.position.y})`)
+      
+      // 벽과 동일한 좌표계: 2D Y → 3D Z 매핑
+      const pos3D = {
+        x: placedObj.position.x,     // Store X → 3D X
+        y: placedObj.height / 2,     // 오브젝트 높이의 절반 (바닥에서 중심까지)  
+        z: placedObj.position.y      // Store Y → 3D Z (벽과 동일)
+      }
+      
+      console.log(`${placedObj.name} 3D 최종 위치: (${pos3D.x}, ${pos3D.y}, ${pos3D.z})`)
+      console.log(`참고: 방 중앙은 (0, 0, 0)이어야 함`)
+      
+      model.position.set(pos3D.x, pos3D.y, pos3D.z)
+      
+      // 모델 회전 설정 (Y축 수직 회전 - 서있는 상태 유지)
+      console.log(`🔄 ${placedObj.name} 회전 설정: ${placedObj.rotation} 라디안 (${(placedObj.rotation * 180 / Math.PI).toFixed(1)}도)`)
+      console.log(`🔄 Z축 회전(기울임) → Y축 회전(수직상태 좌우회전)으로 수정`)
+      
+      // Y축 회전 = 수직축 중심 좌우 회전 (오브젝트가 서있는 상태 유지)
+      const rotationValue = placedObj.rotation
+      const testNegative = true // 2D와 3D 방향 맞추기
+      
+      if (testNegative) {
+        console.log(`🔄 Y축 음수 회전: ${-rotationValue} 라디안 (서있는 상태 유지)`)
+        model.rotation.y = -rotationValue
+      } else {
+        console.log(`🔄 Y축 정방향 회전: ${rotationValue} 라디안 (서있는 상태 유지)`)
+        model.rotation.y = rotationValue
+      }
+      
+      console.log(`✅ ${placedObj.name} Y축 수직 회전 적용 완료 (기울임 없음)`)
+      
+      // 모델 크기 조정 (width, depth, height 기준)
+      const box = new THREE.Box3().setFromObject(model)
+      const size = box.getSize(new THREE.Vector3())
+      const scaleX = placedObj.width / size.x   // 가로 (X축)
+      const scaleZ = placedObj.depth / size.z   // 세로 (Z축)  
+      const scaleY = placedObj.height / size.y  // 높이 (Y축)
+      
+      model.scale.set(scaleX, scaleY, scaleZ)
+      
+      // 메타데이터 설정
+      model.userData = {
+        type: 'placed-object',
+        placedObjectId: placedObj.id,
+        objectName: placedObj.name,
+        category: placedObj.category
+      }
+      
+      scene.add(model)
+      console.log(`=== ${placedObj.name} 3D 씬에 추가 완료! ===`)
+      
+    } catch (error) {
+      console.error(`❌ GLB 모델 로딩 실패 (${placedObj.name}):`, error)
+      // 오류 시 기본 큐브로 대체
+      const fallbackGeometry = new THREE.BoxGeometry(placedObj.width, placedObj.height, placedObj.depth)
+      const fallbackMaterial = new THREE.MeshStandardMaterial({ 
+        color: extractedColor || '#ff0000' // 빨간색으로 오류 표시
+      })
+      const fallbackMesh = new THREE.Mesh(fallbackGeometry, fallbackMaterial)
+      fallbackMesh.position.set(placedObj.position.x, placedObj.height / 2, placedObj.position.y)
+      fallbackMesh.userData = {
+        type: 'placed-object',
+        placedObjectId: placedObj.id,
+        objectName: placedObj.name + ' (오류)',
+        category: placedObj.category
+      }
+      scene.add(fallbackMesh)
+      console.log(`${placedObj.name} 오류로 인해 기본 큐브로 대체됨`)
+    }
+  }
+
+  if (renderer) {
+    renderer.render(scene, camera)
+  }
+}
+
 // Store를 사용한 Make3D - 2D 객체들을 상세한 3D로 변환
-const make3D = () => {
+const make3D = async () => {
   if (loading.value) return
   
   loading.value = true
   
   try {
     const data = floorplanStore.floorplanData
+    console.log('🏗️ Make3D 시작 - Store 데이터:', data)
+    console.log('📦 배치된 오브젝트 개수:', data.placedObjects?.length || 0)
+    console.log('📦 배치된 오브젝트 목록:', data.placedObjects)
 
     if (!data || !data.roomSize) {
+      console.log('❌ Make3D 중단: 방 데이터 없음')
       return
     }
 
     if ((!data.exteriorWalls || data.exteriorWalls.length === 0) && 
         (!data.interiorWalls || data.interiorWalls.length === 0)) {
+      console.log('❌ Make3D 중단: 벽 데이터 없음')
       return
     }
 
+    console.log('🧱 벽 생성 중...')
     create3DWalls(data)
+    
+    console.log('📦 오브젝트 생성 시작...')
+    await create3DObjects(data.placedObjects || [])
+    
+    console.log('✨ 추가 3D 기능 적용...')
     addEnhanced3DFeatures()
     
   } catch (error) {
@@ -434,7 +804,8 @@ const addEnhanced3DFeatures = () => {
   const roomCenterX = (minX + maxX) / 2
   const roomCenterZ = (minZ + maxZ) / 2
   
-  addEnhancedLighting(roomCenterX, roomCenterZ, roomWidth, roomDepth)
+      // GLB 원본 색상 보존을 위해 추가 조명 제거
+    // addEnhancedLighting(roomCenterX, roomCenterZ, roomWidth, roomDepth)
 }
 
 // 천장 기능 제거됨 - 사용자 요청에 따라
@@ -458,7 +829,7 @@ const clearAll3D = () => {
 
   const objectTypesToRemove = [
     'exterior-wall', 'interior-wall', 'room-floor', 'ceiling', 
-    'room-light', 'corner-light', 'wall-decoration'
+    'room-light', 'corner-light', 'wall-decoration', 'placed-object'
   ]
   
   const objectsToRemove: THREE.Object3D[] = []
@@ -506,6 +877,56 @@ const handleResize = () => {
   // Store에 캔버스 크기 업데이트 (3D 뷰어 크기 변경 시)
   floorplanStore.setCanvasSize({ width, height })
 }
+
+// Store 변경 감지 - 배치된 오브젝트 실시간 동기화 (무한루프 방지)
+let isUpdating = false // 업데이트 중 플래그
+watch(
+  () => floorplanStore.placedObjects,
+  async (newObjects, oldObjects) => {
+    if (!scene || !renderer || !camera || isUpdating) return
+    
+    // 실제 개수나 ID 변경만 감지 (위치, 회전 변경 시에만 실행)
+    const oldLength = oldObjects?.length || 0
+    const newLength = newObjects?.length || 0
+    
+    if (oldLength === newLength && oldObjects && newObjects) {
+      // 개수가 같으면 위치나 회전 변경인지 확인
+      const hasPositionChange = newObjects.some((newObj, index) => {
+        const oldObj = oldObjects[index]
+        return oldObj && (
+          Math.abs(newObj.position.x - oldObj.position.x) > 0.001 ||
+          Math.abs(newObj.position.y - oldObj.position.y) > 0.001 ||
+          Math.abs(newObj.rotation - oldObj.rotation) > 0.001
+        )
+      })
+      
+      if (!hasPositionChange) {
+        console.log('🔄 색상 등 무시할 수 있는 변경 - 3D 업데이트 스킵')
+        return
+      }
+    }
+    
+    isUpdating = true
+    console.log('🔄 Store placedObjects 변경 감지 - 3D 동기화 시작')
+    console.log(`📊 오브젝트 개수 변화: ${oldLength} → ${newLength}`)
+    
+    // 삭제된 오브젝트 추적
+    if (newLength < oldLength) {
+      console.log('🗑️ 오브젝트 삭제 감지!')
+      console.log('🗑️ 이전 오브젝트들:', oldObjects?.map(obj => obj.id))
+      console.log('🗑️ 현재 오브젝트들:', newObjects?.map(obj => obj.id))
+    }
+    
+    try {
+      // 실시간 3D 업데이트
+      await updatePlacedObjectsIn3D(newObjects || [])
+      console.log('✅ 3D 오브젝트 동기화 완료')
+    } finally {
+      isUpdating = false
+    }
+  },
+  { deep: true, immediate: false }
+)
 
 // 라이프사이클
 onMounted(() => {

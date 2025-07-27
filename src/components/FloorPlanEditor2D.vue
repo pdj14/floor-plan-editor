@@ -53,18 +53,21 @@
             🧱 Draw Wall
           </button>
           <button 
-            @click="deleteSelectedWall" 
-            :disabled="!selectedWall"
+            @click="deleteSelectedObject" 
+            :disabled="!selectedObject"
             class="btn btn-danger"
-            title="Delete Selected Wall"
+            title="Delete Selected Object"
           >
             🗑️ Delete
           </button>
         </div>
-        <div v-if="selectedWall" class="selection-info">
-          <small>
-            ✅ {{ selectedWall.userData?.type === 'exterior-wall' ? 'Exterior Wall' : 'Interior Wall' }} selected 
-            ({{ selectedWall.userData?.position || 'custom' }}) - Press Delete or click button to remove
+        <div v-if="selectedObject" class="selection-info">
+          <small v-if="selectedObject.userData?.type === 'placed-object'">
+            ✅ Object "{{ selectedObject.userData?.objectName }}" selected - Press Delete or click button to remove
+          </small>
+          <small v-else>
+            ✅ {{ selectedObject.userData?.type === 'exterior-wall' ? 'Exterior Wall' : 'Interior Wall' }} selected 
+            ({{ selectedObject.userData?.position || 'custom' }}) - Press Delete or click button to remove
           </small>
         </div>
         
@@ -72,10 +75,10 @@
         
         <div class="tool-info">
           <small v-if="currentTool === 'select'">
-            🛠️ <strong>Select Mode:</strong> Click interior/exterior walls to select and move them. Use Delete to remove selected walls.
+            🛠️ <strong>Select Mode:</strong> Click walls or objects to select and move them. Use Delete to remove selected items.
           </small>
           <small v-else-if="currentTool === 'wall'">
-            🛠️ <strong>Draw Mode (Active):</strong> Click and drag on canvas to draw new walls. Existing walls are not selectable.
+            🛠️ <strong>Draw Mode (Active):</strong> Click and drag on canvas to draw new walls. Existing items are not selectable.
           </small>
         </div>
         
@@ -131,7 +134,7 @@ const roomWidth = ref(10)  // 기본 가로 10m
 const roomHeight = ref(10) // 기본 세로 10m
 const currentTool = ref('select')
 const mousePosition = ref({ x: 0, y: 0 })
-const selectedWall = ref<any>(null)
+const selectedObject = ref<any>(null)
 
 
 // Store에서 직접 사용할 데이터들 (로컬 state 제거)
@@ -273,7 +276,7 @@ const handleGlobalKeydown = (e: KeyboardEvent) => {
 const handleCanvasKeydown = (e: KeyboardEvent) => {
   if (e.key === 'Delete') {
     e.preventDefault()
-    deleteSelectedWall()
+    deleteSelectedObject()
   }
 }
 
@@ -289,39 +292,56 @@ const setupWallDrawing = () => {
 
   fabricCanvas.on('selection:created', (e: any) => {
     const selected = e.selected[0]
+    console.log('🎯 오브젝트 선택됨:', selected?.userData)
     
+    // placed-object는 두 모드에서 모두 선택 가능
+    if (selected && selected.userData?.type === 'placed-object') {
+      selectedObject.value = selected
+      console.log('✅ 배치된 오브젝트 선택:', selected.userData?.placedObjectId)
+      return
+    }
+    
+    // 벽은 select 모드에서만 선택 가능
     if (currentTool.value !== 'select') {
       fabricCanvas.discardActiveObject()
-      selectedWall.value = null
+      selectedObject.value = null
       return
     }
     
     if (selected && (selected.userData?.type === 'interior-wall' || selected.userData?.type === 'exterior-wall')) {
-      selectedWall.value = selected
+      selectedObject.value = selected
+      console.log('✅ 벽 선택:', selected.userData?.type)
     } else {
-      selectedWall.value = null
+      selectedObject.value = null
+      console.log('❌ 선택 해제')
     }
   })
 
   fabricCanvas.on('selection:updated', (e: any) => {
     const selected = e.selected[0]
     
+    // placed-object는 두 모드에서 모두 선택 가능
+    if (selected && selected.userData?.type === 'placed-object') {
+      selectedObject.value = selected
+      return
+    }
+    
+    // 벽은 select 모드에서만 선택 가능
     if (currentTool.value !== 'select') {
       fabricCanvas.discardActiveObject()
-      selectedWall.value = null
+      selectedObject.value = null
       return
     }
     
     if (selected && (selected.userData?.type === 'interior-wall' || selected.userData?.type === 'exterior-wall')) {
-      selectedWall.value = selected
-      const wallType = selected.userData?.type === 'interior-wall' ? 'Interior Wall' : 'Exterior Wall'
+      selectedObject.value = selected
     } else {
-      selectedWall.value = null
+      selectedObject.value = null
     }
   })
 
   fabricCanvas.on('selection:cleared', () => {
-    selectedWall.value = null
+    selectedObject.value = null
   })
 
   updateWallSelectability()
@@ -331,6 +351,8 @@ const setupWallDrawing = () => {
     if (modifiedObject && (modifiedObject.userData?.type === 'interior-wall' || modifiedObject.userData?.type === 'exterior-wall')) {
       const wallType = modifiedObject.userData?.type === 'interior-wall' ? '내부 벽' : '외부 벽'
       updateInteriorWallInList(modifiedObject)
+    } else if (modifiedObject && modifiedObject.userData?.type === 'placed-object') {
+      updatePlacedObjectInStore(modifiedObject)
     }
   })
 
@@ -339,6 +361,8 @@ const setupWallDrawing = () => {
     if (movingObject && (movingObject.userData?.type === 'interior-wall' || movingObject.userData?.type === 'exterior-wall')) {
       const wallType = movingObject.userData?.type === 'interior-wall' ? '내부 벽' : '외부 벽'
       updateInteriorWallInList(movingObject)
+    } else if (movingObject && movingObject.userData?.type === 'placed-object') {
+      updatePlacedObjectInStore(movingObject)
     }
   })
 
@@ -355,6 +379,8 @@ const setupWallDrawing = () => {
     if (rotatingObject && (rotatingObject.userData?.type === 'interior-wall' || rotatingObject.userData?.type === 'exterior-wall')) {
       const wallType = rotatingObject.userData?.type === 'interior-wall' ? '내부 벽' : '외부 벽'
       updateInteriorWallInList(rotatingObject)
+    } else if (rotatingObject && rotatingObject.userData?.type === 'placed-object') {
+      updatePlacedObjectInStore(rotatingObject)
     }
   })
 
@@ -788,8 +814,15 @@ const updateWallSelectability = () => {
         obj.hoverCursor = 'default'
         obj.moveCursor = 'default'
       }
-      
-      const wallType = obj.userData?.type === 'interior-wall' ? '내부벽' : '외부벽'
+    }
+    
+    // 배치된 오브젝트 처리 - 항상 선택 가능
+    if (obj.userData?.type === 'placed-object') {
+      obj.selectable = true
+      obj.evented = true
+      obj.opacity = 1.0
+      obj.hoverCursor = 'move'
+      obj.moveCursor = 'move'
     }
     
 
@@ -801,9 +834,9 @@ const updateWallSelectability = () => {
   })
   
   // Draw 모드로 변경될 때 현재 선택 해제
-  if (!isSelectMode && selectedWall.value) {
+  if (!isSelectMode && selectedObject.value) {
     fabricCanvas.discardActiveObject()
-    selectedWall.value = null
+    selectedObject.value = null
   }
   
   fabricCanvas.renderAll()
@@ -891,15 +924,300 @@ const updateWallLengthLabel = (wall: any) => {
   }
 }
 
+// 2D 캔버스에서 오브젝트 색상 업데이트
+const updateObjectColorOnCanvas = (placedObjectId: string, newColor: string) => {
+  if (!fabricCanvas) return
+  
+  // 캔버스에서 해당 오브젝트 찾기
+  const fabricObject = fabricCanvas.getObjects().find((obj: any) => 
+    obj.userData?.type === 'placed-object' && obj.userData?.placedObjectId === placedObjectId
+  )
+  
+  if (fabricObject && fabricObject.type === 'group') {
+    // 그룹 내의 사각형 오브젝트 색상 변경
+    fabricObject.getObjects().forEach((child: any) => {
+      if (child.type === 'rect') {
+        child.set('fill', newColor)
+      }
+    })
+    fabricCanvas.renderAll()
+  }
+}
+
+// Store 기반 2D 오브젝트 재구성 (3D와 동일한 방식)
+const rerender2DObjectsFromStore = () => {
+  if (!fabricCanvas) return
+  
+  console.log('🔄 2D Store 기반 재구성 시작')
+  
+  // 기존 배치 오브젝트 모두 제거
+  const objectsToRemove = fabricCanvas.getObjects().filter((obj: any) => 
+    obj.userData?.type === 'placed-object'
+  )
+  
+  console.log(`🗑️ 2D에서 제거할 기존 오브젝트 개수: ${objectsToRemove.length}`)
+  
+  objectsToRemove.forEach(obj => {
+    fabricCanvas.remove(obj)
+  })
+  
+  // Store 데이터 기반으로 모든 오브젝트 재생성
+  floorplanStore.placedObjects.forEach(placedObj => {
+    const canvasWidth = fabricCanvas.width || 800
+    const canvasHeight = fabricCanvas.height || 600
+    
+    // Store 좌표 → 2D Canvas 좌표 변환
+    const fabricX = placedObj.position.x * 40 + canvasWidth / 2
+    const fabricY = placedObj.position.y * 40 + canvasHeight / 2
+    
+    // 오브젝트 모양 생성
+    const objectShape = new fabric.Rect({
+      left: fabricX - (placedObj.width * 40) / 2,
+      top: fabricY - (placedObj.depth * 40) / 2,
+      width: placedObj.width * 40,
+      height: placedObj.depth * 40,
+      fill: placedObj.color || getObjectColor(placedObj.category),
+      stroke: '#333',
+      strokeWidth: 1,
+      selectable: true,
+      evented: true
+    })
+    
+    // 라벨 생성
+    const label = new fabric.Text(placedObj.name, {
+      left: fabricX,
+      top: fabricY,
+      fontSize: 12,
+      textAlign: 'center',
+      originX: 'center',
+      originY: 'center',
+      selectable: false,
+      evented: false,
+      fill: '#000'
+    })
+    
+    // 그룹으로 묶기
+    const group = new fabric.Group([objectShape, label], {
+      left: fabricX,
+      top: fabricY,
+      originX: 'center',
+      originY: 'center',
+      angle: placedObj.rotation * (180 / Math.PI), // 라디안 → 도
+      selectable: true,
+      evented: true,
+      hasRotatingPoint: true
+    })
+    
+    group.userData = {
+      type: 'placed-object',
+      placedObjectId: placedObj.id,
+      objectName: placedObj.name
+    }
+    
+    fabricCanvas.add(group)
+  })
+  
+  fabricCanvas.renderAll()
+  console.log(`✅ 2D Store 기반 재구성 완료 (${floorplanStore.placedObjects.length}개 오브젝트)`)
+}
+
+// Store에서 배치된 오브젝트 정보 업데이트
+const updatePlacedObjectInStore = (fabricObject: any) => {
+  if (!fabricObject || !fabricObject.userData?.placedObjectId) return
+  
+  const placedObjectId = fabricObject.userData.placedObjectId
+  const canvasWidth = fabricCanvas?.width || 800
+  const canvasHeight = fabricCanvas?.height || 600
+  
+  // Fabric.js 좌표를 3D 월드 좌표로 변환 (벽과 동일한 방식)
+  const worldX = (fabricObject.left - canvasWidth / 2) / 40   // X축 좌표
+  const worldY = (fabricObject.top - canvasHeight / 2) / 40   // Y축 좌표 (벽과 동일한 방식)
+  
+  // 회전값 변환 (Fabric.js는 도 단위, Store는 라디안 단위)
+  const fabricAngle = fabricObject.angle || 0
+  const rotationRadians = fabricAngle * (Math.PI / 180)
+  
+  console.log(`🔄 2D 회전 업데이트: ${fabricAngle}도 → ${rotationRadians.toFixed(3)} 라디안`)
+  console.log(`🔄 시계방향이 양수인지 확인 중...`)
+  
+  console.log(`오브젝트 이동: Fabric(${fabricObject.left}, ${fabricObject.top}) → World(${worldX}, ${worldY})`)
+  
+  // Store에서 해당 오브젝트 찾기
+  const existingObject = floorplanStore.placedObjects.find(obj => obj.id === placedObjectId)
+  if (existingObject) {
+    const updatedObject = {
+      ...existingObject,
+      position: { x: worldX, y: worldY },
+      rotation: rotationRadians
+    }
+    floorplanStore.updatePlacedObject(placedObjectId, updatedObject)
+  }
+}
+
+// Object Library에서 오브젝트 배치 처리
+const handlePlaceObject = (event: any) => {
+  if (!fabricCanvas) return
+  
+  const { object } = event.detail
+  
+  // 캔버스 중앙에 배치
+  const canvasWidth = fabricCanvas.width || 800
+  const canvasHeight = fabricCanvas.height || 600
+  const centerX = canvasWidth / 2
+  const centerY = canvasHeight / 2
+  
+  // 오브젝트 크기 (미터 단위를 픽셀로 변환) - 2D에서는 width(가로), depth(세로) 사용
+  const meterToPixel = 40 // 1m = 40px
+  const objectWidth = (object.width || 1) * meterToPixel   // 가로
+  const objectHeight = (object.depth || 1) * meterToPixel  // 세로 (2D 표현용)
+  
+  // 카테고리별 색상 및 모양 설정
+  let objectShape: any
+  // GLB에서 추출한 색상이 있으면 사용, 없으면 카테고리 기본 색상 사용
+  const objectColor = object.color || getObjectColor(object.category)
+  const objectIcon = getObjectIcon(object.category)
+  
+  // 사각형으로 오브젝트 표현 (추후 이미지나 복잡한 도형으로 확장 가능)
+  objectShape = new fabric.Rect({
+    left: 0, // 그룹 내에서의 상대 위치
+    top: 0,  // 그룹 내에서의 상대 위치
+    width: objectWidth,
+    height: objectHeight,
+    fill: objectColor,
+    stroke: '#333',
+    strokeWidth: 2,
+    angle: 0,
+    originX: 'center',
+    originY: 'center'
+  })
+  
+  // 오브젝트 이름 레이블 추가
+  const nameLabel = new fabric.Text(`${objectIcon} ${object.name}`, {
+    left: 0, // 그룹 내에서의 상대 위치
+    top: objectHeight / 2 + 10, // 오브젝트 아래쪽에 배치
+    fontSize: 10,
+    fill: '#333',
+    fontFamily: 'Arial',
+    textAlign: 'center',
+    originX: 'center',
+    originY: 'center',
+    selectable: false,
+    evented: false,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    padding: 2
+  })
+  
+  // 고유 ID 생성 (배치된 오브젝트용)
+  const placedObjectId = `placed-${object.id}-${Date.now()}`
+  
+  // 오브젝트와 레이블을 그룹으로 묶기
+  const objectGroup = new fabric.Group([objectShape, nameLabel], {
+    left: centerX,
+    top: centerY,
+    originX: 'center',
+    originY: 'center',
+    selectable: true,
+    evented: true,
+    hasControls: true,
+    hasBorders: true,
+    lockScalingX: true,
+    lockScalingY: true,
+    lockUniScaling: true,
+    hasRotatingPoint: true,
+    userData: {
+      type: 'placed-object',
+      placedObjectId: placedObjectId,
+      objectId: object.id,
+      objectName: object.name,
+      category: object.category,
+      glbUrl: object.glbUrl,
+      description: object.description,
+      width: object.width,
+      height: object.height
+    }
+  })
+  
+  // 크기 조정 핸들만 숨기고 회전 핸들은 유지
+  objectGroup.setControlsVisibility({
+    tl: false, // top-left
+    tr: false, // top-right
+    br: false, // bottom-right
+    bl: false, // bottom-left
+    ml: false, // middle-left
+    mt: false, // middle-top
+    mr: false, // middle-right
+    mb: false, // middle-bottom
+    mtr: true  // rotation handle (middle-top-rotate)
+  })
+  
+  fabricCanvas.add(objectGroup)
+  fabricCanvas.renderAll()
+  
+  // Store에 배치된 오브젝트 정보 추가 (벽과 동일한 좌표계 사용)
+  const placedObjectData = {
+    id: placedObjectId,
+    name: object.name,
+    category: object.category,
+    glbUrl: object.glbUrl,
+    description: object.description,
+    width: object.width || 1,    // 가로 (2D X축)
+    depth: object.depth || 1,    // 세로 (2D Y축)
+    height: object.height || 2,  // 높이 (3D에서만 사용)
+    position: {
+      x: (centerX - canvasWidth / 2) / 40,  // 벽과 동일한 좌표 변환
+      y: (centerY - canvasHeight / 2) / 40  // 벽과 동일한 좌표 변환
+    },
+    rotation: 0, // 초기 회전값
+    color: object.color // GLB에서 추출한 색상 (있다면)
+  }
+  
+  console.log('📦 Store에 오브젝트 추가 중:', placedObjectData)
+  floorplanStore.addPlacedObject(placedObjectData)
+  
+  console.log('📦 Store 현재 상태 - placedObjects 개수:', floorplanStore.placedObjects.length)
+  console.log('📦 Store 현재 상태 - placedObjects:', floorplanStore.placedObjects)
+  
+  // 🚀 핵심 개선: Store 기반 2D 재구성 (일관성 있는 렌더링)
+  console.log('🔄 Store 변경으로 인한 2D 재구성 시작')
+  rerender2DObjectsFromStore()
+  console.log('✅ Store 기반 2D 재구성 완료')
+  
+  // 배치 완료 알림
+  alert(`${object.name}이(가) 2D 뷰에 배치되었습니다!`)
+}
+
+// 카테고리별 색상 반환
+const getObjectColor = (category: string): string => {
+  const colorMap: { [key: string]: string } = {
+    robot: '#FF6B6B',     // 빨간색 계열
+    equipment: '#4ECDC4',  // 청록색 계열
+    appliances: '#45B7D1', // 파란색 계열
+    etc: '#96CEB4'        // 녹색 계열
+  }
+  return colorMap[category] || '#CCCCCC'
+}
+
+// 카테고리별 아이콘 반환
+const getObjectIcon = (category: string): string => {
+  const iconMap: { [key: string]: string } = {
+    robot: '🤖',
+    equipment: '⚙️',
+    appliances: '🔌',
+    etc: '📦'
+  }
+  return iconMap[category] || '📦'
+}
+
 const clearCanvas = () => {
   if (!fabricCanvas) return
   
   fabricCanvas.clear()
   addGrid()
-  selectedWall.value = null
+  selectedObject.value = null
   
   // Store 초기화
   floorplanStore.clearRoom()
+  floorplanStore.clearPlacedObjects()
   
   // 캔버스 크기 정보 업데이트
   const canvasWidth = fabricCanvas.width || 800
@@ -923,50 +1241,101 @@ const exportFloorPlan = () => {
   link.click()
 }
 
-// 선택된 벽 삭제
-const deleteSelectedWall = () => {
-  if (!selectedWall.value || !fabricCanvas) {
+// 선택된 오브젝트 삭제
+const deleteSelectedObject = () => {
+  console.log('🗑️ 삭제 시도:', selectedObject.value)
+  
+  if (!selectedObject.value || !fabricCanvas) {
+    console.log('❌ 삭제 실패: selectedObject 없음 또는 canvas 없음')
+    alert('삭제할 오브젝트를 먼저 선택해주세요.')
     return
   }
 
-  const wallToDelete = selectedWall.value
-  const wallId = wallToDelete.userData?.id
-  const wallType = wallToDelete.userData?.type
-
-  // 벽 정보 수집
-  const associatedLabel = fabricCanvas.getObjects().find((obj: any) => 
-    obj.userData?.type === 'wall-length-label' && obj.userData?.wallId === wallId
-  )
+  const objectToDelete = selectedObject.value
+  const objectId = objectToDelete.userData?.id
+  const objectType = objectToDelete.userData?.type
   
-  if (associatedLabel) {
-    fabricCanvas.remove(associatedLabel)
+  console.log(`🗑️ 삭제 대상: ${objectType}, ID: ${objectId}`)
+  
+    if (objectType === 'placed-object') {
+    // 배치된 오브젝트 삭제 (그룹으로 묶여있으므로 레이블도 함께 삭제됨)
+    const placedObjectId = objectToDelete.userData?.placedObjectId
+    console.log(`📦 배치된 오브젝트 삭제: ${placedObjectId}`)
+    
+    console.log('🎯 Fabric.js 제거 전 canvas 객체 수:', fabricCanvas.getObjects().length)
+    console.log('🎯 제거할 객체:', objectToDelete)
+    console.log('🎯 제거할 객체 타입:', objectToDelete.type)
+    
+    fabricCanvas.remove(objectToDelete)
+    
+    console.log('🎯 Fabric.js 제거 후 canvas 객체 수:', fabricCanvas.getObjects().length)
+    
+    // 강제 렌더링
+    fabricCanvas.renderAll()
+    fabricCanvas.requestRenderAll()
+    
+    console.log('🎯 Fabric.js 강제 렌더링 완료')
+    
+    // Store에서도 제거
+    if (placedObjectId) {
+      console.log(`🗑️ Store 제거 전 개수: ${floorplanStore.placedObjects.length}`)
+      console.log(`🗑️ Store 제거 전 오브젝트들:`, floorplanStore.placedObjects.map(obj => obj.id))
+      
+      floorplanStore.removePlacedObject(placedObjectId)
+      
+      console.log(`🗑️ Store 제거 후 개수: ${floorplanStore.placedObjects.length}`)
+      console.log(`🗑️ Store 제거 후 오브젝트들:`, floorplanStore.placedObjects.map(obj => obj.id))
+      console.log(`✅ Store에서 오브젝트 제거 완료: ${placedObjectId}`)
+      
+      // 🚀 핵심 개선: Store 기반 2D 재구성 (3D와 동일한 방식)
+      console.log('🔄 Store 변경으로 인한 2D 재구성 시작')
+      rerender2DObjectsFromStore()
+      console.log('✅ Store 기반 2D 재구성 완료')
+      
+    } else {
+      console.log('⚠️ placedObjectId 없음')
+    }
+    
+    // 선택 해제
+    selectedObject.value = null
+    fabricCanvas.discardActiveObject()
+    console.log('✅ 배치된 오브젝트 삭제 완료')
+    
+  } else if (objectType === 'interior-wall' || objectType === 'exterior-wall') {
+    // 벽 삭제 (기존 로직)
+    const associatedLabel = fabricCanvas.getObjects().find((obj: any) => 
+      obj.userData?.type === 'wall-length-label' && obj.userData?.wallId === objectId
+    )
+    
+    if (associatedLabel) {
+      fabricCanvas.remove(associatedLabel)
+    }
+
+    fabricCanvas.remove(objectToDelete)
+
+    const allObjects = fabricCanvas.getObjects()
+    const wallsToRemove = allObjects.filter((obj: any) => 
+      obj.userData?.id === objectId && (obj.userData?.type === 'interior-wall' || obj.userData?.type === 'exterior-wall')
+    )
+    
+    wallsToRemove.forEach((wall: any) => {
+      fabricCanvas.remove(wall)
+    })
+
+    // Store에서 벽 제거
+    if (objectType === 'interior-wall') {
+      if (objectId) {
+        floorplanStore.removeInteriorWall(objectId)
+      }
+    } else if (objectType === 'exterior-wall') {
+      if (objectId) {
+        floorplanStore.removeExteriorWall(objectId)
+      }
+    }
   }
 
-  fabricCanvas.remove(wallToDelete)
-
-  const allObjects = fabricCanvas.getObjects()
-  const wallsToRemove = allObjects.filter((obj: any) => 
-    obj.userData?.id === wallId && (obj.userData?.type === 'interior-wall' || obj.userData?.type === 'exterior-wall')
-  )
-  
-  wallsToRemove.forEach((wall: any) => {
-    fabricCanvas.remove(wall)
-  })
-
-  // 4. Store에서 벽 제거 (타입별 처리)
-  
-  if (wallType === 'interior-wall') {
-    if (wallId) {
-      floorplanStore.removeInteriorWall(wallId)
-    }
-  } else if (wallType === 'exterior-wall') {
-    if (wallId) {
-      floorplanStore.removeExteriorWall(wallId)
-    }
-  }
-
-  // 5. 선택 해제
-  selectedWall.value = null
+  // 선택 해제
+  selectedObject.value = null
   fabricCanvas.discardActiveObject()
   
   // 5. 강제 캔버스 재렌더링 (여러 방법 시도)
@@ -1009,10 +1378,29 @@ watch(currentTool, (newTool, oldTool) => {
   updateWallSelectability()
 })
 
+// Store의 배치된 오브젝트 색상 변경 감지
+watch(
+  () => floorplanStore.placedObjects,
+  (newObjects, oldObjects) => {
+    if (!fabricCanvas || !newObjects) return
+    
+    // 색상이 변경된 오브젝트들을 찾아서 2D 캔버스 업데이트
+    newObjects.forEach(newObj => {
+      const oldObj = oldObjects?.find(old => old.id === newObj.id)
+      
+      // 색상이 새로 추가되거나 변경된 경우
+      if (newObj.color && (!oldObj || oldObj.color !== newObj.color)) {
+        updateObjectColorOnCanvas(newObj.id, newObj.color)
+      }
+    })
+  },
+  { deep: true }
+)
+
 onMounted(() => {
   initCanvas()
   window.addEventListener('resize', handleResize)
-  
+  window.addEventListener('placeObject', handlePlaceObject)
 })
 
 onUnmounted(() => {
@@ -1044,6 +1432,7 @@ onUnmounted(() => {
   
   document.removeEventListener('keydown', handleGlobalKeydown)
   window.removeEventListener('resize', handleResize)
+  window.removeEventListener('placeObject', handlePlaceObject)
 })
 </script>
 

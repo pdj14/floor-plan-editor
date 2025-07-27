@@ -29,12 +29,28 @@ interface CanvasSize {
   height: number
 }
 
+// 배치된 오브젝트 타입 정의
+interface PlacedObject {
+  id: string
+  name: string
+  category: string
+  glbUrl: string
+  description?: string
+  width: number  // 가로
+  depth: number  // 세로
+  height: number // 높이
+  position: Point
+  rotation: number // 회전 각도 (라디안)
+  color?: string   // GLB에서 추출한 주요 색상 (hex)
+}
+
 // Floorplan Store
 export const useFloorplanStore = defineStore('floorplan', () => {
   // 상태 (state)
   const currentRoom = ref<Room | null>(null)
   const interiorWalls = ref<Wall[]>([])
   const exteriorWalls = ref<Wall[]>([]) // 외부벽도 직접 저장
+  const placedObjects = ref<PlacedObject[]>([]) // 배치된 오브젝트들
   const canvasSize = ref<CanvasSize>({ width: 800, height: 600 })
   
   // Getters (computed)
@@ -56,6 +72,7 @@ export const useFloorplanStore = defineStore('floorplan', () => {
   const floorplanData = computed(() => ({
     exteriorWalls: exteriorWalls.value, // 이제 ref로 직접 접근
     interiorWalls: interiorWalls.value,
+    placedObjects: placedObjects.value, // 배치된 오브젝트 정보 추가
     roomSize: currentRoom.value ? {
       width: currentRoom.value.width,
       height: currentRoom.value.height,
@@ -74,6 +91,7 @@ export const useFloorplanStore = defineStore('floorplan', () => {
     currentRoom.value = null
     interiorWalls.value = []
     exteriorWalls.value = []
+    placedObjects.value = []
   }
   
   const setCanvasSize = (size: CanvasSize) => {
@@ -117,6 +135,26 @@ export const useFloorplanStore = defineStore('floorplan', () => {
   const clearExteriorWalls = () => {
     exteriorWalls.value = []
   }
+
+  // 배치된 오브젝트 관리 액션들
+  const addPlacedObject = (object: PlacedObject) => {
+    placedObjects.value.push(object)
+  }
+  
+  const updatePlacedObject = (objectId: string, updatedObject: PlacedObject) => {
+    const index = placedObjects.value.findIndex(obj => obj.id === objectId)
+    if (index > -1) {
+      placedObjects.value[index] = updatedObject
+    }
+  }
+  
+  const removePlacedObject = (objectId: string) => {
+    placedObjects.value = placedObjects.value.filter(obj => obj.id !== objectId)
+  }
+  
+  const clearPlacedObjects = () => {
+    placedObjects.value = []
+  }
   
   const logCurrentState = () => {
     // 디버깅용 함수 (빈 함수로 유지)
@@ -127,6 +165,7 @@ export const useFloorplanStore = defineStore('floorplan', () => {
     currentRoom,
     interiorWalls,
     exteriorWalls, // 외부벽 추가
+    placedObjects, // 배치된 오브젝트 추가
     canvasSize,
     
     // Getters
@@ -146,6 +185,10 @@ export const useFloorplanStore = defineStore('floorplan', () => {
     updateExteriorWall,
     removeExteriorWall,
     clearExteriorWalls,
+    addPlacedObject, // 배치된 오브젝트 액션들 추가
+    updatePlacedObject,
+    removePlacedObject,
+    clearPlacedObjects,
     logCurrentState
   }
 }) 

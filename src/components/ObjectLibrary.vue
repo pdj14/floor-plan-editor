@@ -11,11 +11,10 @@
     <div class="category-filter">
       <select v-model="selectedCategory" @change="filterObjects">
         <option value="all">All Categories</option>
-        <option value="furniture">🪑 Furniture</option>
-        <option value="decoration">🎨 Decoration</option>
+        <option value="robot">🤖 Robot</option>
+        <option value="equipment">⚙️ Equipment</option>
         <option value="appliances">🔌 Appliances</option>
-        <option value="lighting">💡 Lighting</option>
-        <option value="custom">📦 Custom</option>
+        <option value="etc">📂 ETC</option>
       </select>
     </div>
 
@@ -79,12 +78,50 @@
             <div class="form-group">
               <label>Category:</label>
               <select v-model="newObject.category" required>
-                <option value="furniture">Furniture</option>
-                <option value="decoration">Decoration</option>
+                <option value="robot">Robot</option>
+                <option value="equipment">Equipment</option>
                 <option value="appliances">Appliances</option>
-                <option value="lighting">Lighting</option>
-                <option value="custom">Custom</option>
+                <option value="etc">ETC</option>
               </select>
+            </div>
+            
+            <div class="form-group">
+              <label>Width (m):</label>
+              <input 
+                v-model.number="newObject.width" 
+                type="number" 
+                min="0.1" 
+                max="10" 
+                step="0.1" 
+                required 
+                placeholder="가로 크기"
+              />
+            </div>
+            
+            <div class="form-group">
+              <label>Depth (m):</label>
+              <input 
+                v-model.number="newObject.depth" 
+                type="number" 
+                min="0.1" 
+                max="10" 
+                step="0.1" 
+                required 
+                placeholder="세로 크기"
+              />
+            </div>
+            
+            <div class="form-group">
+              <label>Height (m):</label>
+              <input 
+                v-model.number="newObject.height" 
+                type="number" 
+                min="0.1" 
+                max="10" 
+                step="0.1" 
+                required 
+                placeholder="높이 크기"
+              />
             </div>
             
             <div class="form-group">
@@ -131,37 +168,15 @@
         <p><strong>Name:</strong> {{ selectedObject.name }}</p>
         <p><strong>Category:</strong> {{ selectedObject.category }}</p>
         <p><strong>Size:</strong> {{ selectedObject.size || 'Unknown' }}</p>
+                  <p v-if="selectedObject.width && selectedObject.depth && selectedObject.height">
+            <strong>Dimensions:</strong> {{ selectedObject.width }}m (W) × {{ selectedObject.depth }}m (D) × {{ selectedObject.height }}m (H)
+        </p>
         <p v-if="selectedObject.description">
           <strong>Description:</strong> {{ selectedObject.description }}
         </p>
       </div>
       
       <div class="placement-controls">
-        <h5>Placement Options</h5>
-        <div class="form-group">
-          <label>Scale:</label>
-          <input 
-            v-model="placementOptions.scale" 
-            type="range" 
-            min="0.1" 
-            max="3" 
-            step="0.1"
-          />
-          <span>{{ placementOptions.scale }}x</span>
-        </div>
-        
-        <div class="form-group">
-          <label>Rotation:</label>
-          <input 
-            v-model="placementOptions.rotation" 
-            type="range" 
-            min="0" 
-            max="360" 
-            step="15"
-          />
-          <span>{{ placementOptions.rotation }}°</span>
-        </div>
-        
         <button @click="placeObject" class="btn btn-primary">
           Place in 2D View
         </button>
@@ -182,18 +197,21 @@ interface GameObject {
   thumbnail?: string
   description?: string
   size?: string
+  width?: number  // 가로
+  depth?: number  // 세로
+  height?: number // 높이
 }
 
 interface NewObject {
   name: string
   category: string
   description: string
+  width: number  // 가로
+  depth: number  // 세로
+  height: number // 높이
 }
 
-interface PlacementOptions {
-  scale: number
-  rotation: number
-}
+
 
 // 상태 관리
 const objects = ref<GameObject[]>([])
@@ -206,14 +224,14 @@ const uploading = ref(false)
 
 const newObject = ref<NewObject>({
   name: '',
-  category: 'furniture',
-  description: ''
+  category: 'robot',
+  description: '',
+  width: 1.0,
+  depth: 1.0,
+  height: 2.0
 })
 
-const placementOptions = ref<PlacementOptions>({
-  scale: 1,
-  rotation: 0
-})
+
 
 let selectedFile: File | null = null
 let selectedThumbnail: File | null = null
@@ -221,49 +239,16 @@ let selectedThumbnail: File | null = null
 // 기본 오브젝트들
 const defaultObjects: GameObject[] = [
   {
-    id: '1',
-    name: 'Chair',
-    category: 'furniture',
-    glbUrl: '/models/chair.glb',
-    thumbnail: '/thumbnails/chair.png',
-    description: 'Modern office chair',
-    size: '0.6m x 0.6m x 1.2m'
-  },
-  {
-    id: '2',
-    name: 'Table',
-    category: 'furniture',
-    glbUrl: '/models/table.glb',
-    thumbnail: '/thumbnails/table.png',
-    description: 'Wooden dining table',
-    size: '2m x 1m x 0.8m'
-  },
-  {
-    id: '3',
-    name: 'Sofa',
-    category: 'furniture',
-    glbUrl: '/models/sofa.glb',
-    thumbnail: '/thumbnails/sofa.png',
-    description: 'Comfortable 3-seat sofa',
-    size: '2.2m x 0.9m x 0.8m'
-  },
-  {
-    id: '4',
-    name: 'Plant',
-    category: 'decoration',
-    glbUrl: '/models/plant.glb',
-    thumbnail: '/thumbnails/plant.png',
-    description: 'Indoor decorative plant',
-    size: '0.3m x 0.3m x 0.6m'
-  },
-  {
-    id: '5',
-    name: 'Lamp',
-    category: 'lighting',
-    glbUrl: '/models/lamp.glb',
-    thumbnail: '/thumbnails/lamp.png',
-    description: 'Table lamp with warm light',
-    size: '0.3m x 0.3m x 0.5m'
+    id: 'default-refrigerator',
+    name: '냉장고',
+    category: 'appliances',
+    glbUrl: '/pearl_refrigerator_final.glb',
+    thumbnail: '/냉장고1.png',
+    description: '가정용 양문냉장고',
+    size: '1.2m × 1.0m × 2.0m',
+    width: 1.2,
+    depth: 1.0,
+    height: 2.0
   }
 ]
 
@@ -303,8 +288,7 @@ const startDrag = (object: GameObject, event: DragEvent) => {
   if (event.dataTransfer) {
     event.dataTransfer.setData('application/json', JSON.stringify({
       type: 'object',
-      object: object,
-      placementOptions: placementOptions.value
+      object: object
     }))
   }
 }
@@ -353,7 +337,10 @@ const uploadObject = async () => {
       description: newObject.value.description,
       glbUrl: objectUrl,
       thumbnail: thumbnailUrl,
-      size: 'Custom size'
+      size: `${newObject.value.width}m × ${newObject.value.depth}m × ${newObject.value.height}m`,
+      width: newObject.value.width,
+      depth: newObject.value.depth,
+      height: newObject.value.height
     }
 
     objects.value.push(newObj)
@@ -396,8 +383,7 @@ const placeObject = () => {
   // 이벤트 발생 (부모 컴포넌트에서 처리)
   window.dispatchEvent(new CustomEvent('placeObject', {
     detail: {
-      object: selectedObject.value,
-      options: placementOptions.value
+      object: selectedObject.value
     }
   }))
 }
@@ -407,8 +393,11 @@ const closeModal = () => {
   showUploadModal.value = false
   newObject.value = {
     name: '',
-    category: 'furniture',
-    description: ''
+    category: 'robot',
+    description: '',
+    width: 1.0,
+    depth: 1.0,
+    height: 2.0
   }
   selectedFile = null
   selectedThumbnail = null
@@ -658,33 +647,5 @@ onMounted(() => {
   margin-top: 1rem;
   padding-top: 1rem;
   border-top: 1px solid #eee;
-}
-
-.placement-controls h5 {
-  margin: 0 0 0.5rem 0;
-  color: #2c3e50;
-}
-
-.placement-controls .form-group {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-}
-
-.placement-controls .form-group label {
-  margin: 0;
-  font-weight: normal;
-  min-width: 60px;
-}
-
-.placement-controls .form-group input[type="range"] {
-  flex: 1;
-}
-
-.placement-controls .form-group span {
-  min-width: 40px;
-  font-size: 0.8rem;
-  color: #666;
 }
 </style> 
