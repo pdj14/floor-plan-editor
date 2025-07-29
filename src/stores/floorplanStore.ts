@@ -42,6 +42,9 @@ interface PlacedObject {
   position: Point
   rotation: number // 회전 각도 (라디안)
   color?: string   // GLB에서 추출한 주요 색상 (hex)
+  isOnBox?: boolean // 상자 위 배치 여부
+  boxId?: string    // 상자 ID (상자 위에 배치된 경우)
+  isBox?: boolean   // 상자 여부
 }
 
 // Floorplan Store

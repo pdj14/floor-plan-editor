@@ -691,6 +691,13 @@ const create3DObjects = async (placedObjects: any[]) => {
   for (const placedObj of placedObjects) {
     let extractedColor = '#CCCCCC' // 기본 색상
     
+    // 상자인 경우 특별한 3D 상자 모델 생성
+    if (placedObj.category === 'etc' && placedObj.isBox) {
+      console.log(`📦 상자 3D 모델 생성: ${placedObj.name}`)
+      create3DBox(placedObj, placedObj.color || '#D2B48C')
+      continue
+    }
+    
     try {
       console.log(`=== ${placedObj.name} GLB 로딩 시작: ${placedObj.glbUrl} ===`)
       
@@ -771,13 +778,31 @@ const create3DObjects = async (placedObjects: any[]) => {
       
       console.log(`=== ${placedObj.name} GLB 색상 처리 완료 ===`)
       
-      // 모델 위치 설정 (벽과 완전히 동일한 좌표 변환)
+      // 모델 크기 조정 (width, depth, height 기준) - 먼저 스케일 적용
+      const box = new THREE.Box3().setFromObject(model)
+      const size = box.getSize(new THREE.Vector3())
+      const scaleX = placedObj.width / size.x   // 가로 (X축)
+      const scaleZ = placedObj.depth / size.z   // 세로 (Z축)  
+      const scaleY = placedObj.height / size.y  // 높이 (Y축)
+      
+      model.scale.set(scaleX, scaleY, scaleZ)
+      
+      // 스케일 적용 후 다시 바운딩박스 계산
+      const scaledBox = new THREE.Box3().setFromObject(model)
+      const scaledSize = scaledBox.getSize(new THREE.Vector3())
+      
+      console.log(`${placedObj.name} 원본 크기: ${size.x.toFixed(3)} x ${size.y.toFixed(3)} x ${size.z.toFixed(3)}`)
+      console.log(`${placedObj.name} 스케일: ${scaleX.toFixed(3)} x ${scaleY.toFixed(3)} x ${scaleZ.toFixed(3)}`)
+      console.log(`${placedObj.name} 스케일 후 크기: ${scaledSize.x.toFixed(3)} x ${scaledSize.y.toFixed(3)} x ${scaledSize.z.toFixed(3)}`)
+      
+      // 모델 위치 설정 (스케일 적용 후)
       console.log(`${placedObj.name} Store 좌표: (${placedObj.position.x}, ${placedObj.position.y})`)
       
-      // 벽과 동일한 좌표계: 2D Y → 3D Z 매핑
+      // TV는 바닥에 붙어있어야 하므로 y=0으로 설정
+      const isTV = placedObj.category === 'av'
       const pos3D = {
         x: placedObj.position.x,     // Store X → 3D X
-        y: placedObj.height / 2,     // 오브젝트 높이의 절반 (바닥에서 중심까지)  
+        y: isTV ? 0 : placedObj.height / 2,  // TV는 바닥에, 다른 오브젝트는 중심에
         z: placedObj.position.y      // Store Y → 3D Z (벽과 동일)
       }
       
@@ -804,21 +829,14 @@ const create3DObjects = async (placedObjects: any[]) => {
       
       console.log(`✅ ${placedObj.name} Y축 수직 회전 적용 완료 (기울임 없음)`)
       
-      // 모델 크기 조정 (width, depth, height 기준)
-      const box = new THREE.Box3().setFromObject(model)
-      const size = box.getSize(new THREE.Vector3())
-      const scaleX = placedObj.width / size.x   // 가로 (X축)
-      const scaleZ = placedObj.depth / size.z   // 세로 (Z축)  
-      const scaleY = placedObj.height / size.y  // 높이 (Y축)
-      
-      model.scale.set(scaleX, scaleY, scaleZ)
-      
       // 메타데이터 설정
       model.userData = {
         type: 'placed-object',
         placedObjectId: placedObj.id,
         objectName: placedObj.name,
-        category: placedObj.category
+        category: placedObj.category,
+        height: placedObj.height, // 높이 정보 추가
+        boxId: placedObj.boxId // 상자 ID 정보 추가
       }
       
       console.log(`🔍 Scene 추가 전 children 수: ${scene.children.length}`)
@@ -834,27 +852,199 @@ const create3DObjects = async (placedObjects: any[]) => {
       
     } catch (error) {
       console.error(`❌ GLB 모델 로딩 실패 (${placedObj.name}):`, error)
-      // 오류 시 기본 큐브로 대체
-      const fallbackGeometry = new THREE.BoxGeometry(placedObj.width, placedObj.height, placedObj.depth)
-      const fallbackMaterial = new THREE.MeshStandardMaterial({ 
-        color: extractedColor || '#ff0000' // 빨간색으로 오류 표시
-      })
-      const fallbackMesh = new THREE.Mesh(fallbackGeometry, fallbackMaterial)
-      fallbackMesh.position.set(placedObj.position.x, placedObj.height / 2, placedObj.position.y)
-      fallbackMesh.userData = {
-        type: 'placed-object',
-        placedObjectId: placedObj.id,
-        objectName: placedObj.name + ' (오류)',
-        category: placedObj.category
+      
+      // 상자인 경우 특별한 3D 상자 모델 생성
+      if (placedObj.category === 'etc' && placedObj.isOnBox) {
+        create3DBox(placedObj, extractedColor)
+      } else {
+        // 오류 시 기본 큐브로 대체
+        const fallbackGeometry = new THREE.BoxGeometry(placedObj.width, placedObj.height, placedObj.depth)
+        const fallbackMaterial = new THREE.MeshStandardMaterial({ 
+          color: extractedColor || '#ff0000' // 빨간색으로 오류 표시
+        })
+        const fallbackMesh = new THREE.Mesh(fallbackGeometry, fallbackMaterial)
+        fallbackMesh.position.set(placedObj.position.x, placedObj.height / 2, placedObj.position.y)
+        fallbackMesh.userData = {
+          type: 'placed-object',
+          placedObjectId: placedObj.id,
+          objectName: placedObj.name + ' (오류)',
+          category: placedObj.category,
+          height: placedObj.height, // 높이 정보 추가
+          boxId: placedObj.boxId // 상자 ID 정보 추가
+        }
+        scene.add(fallbackMesh)
+        console.log(`${placedObj.name} 오류로 인해 기본 큐브로 대체됨`)
       }
-      scene.add(fallbackMesh)
-      console.log(`${placedObj.name} 오류로 인해 기본 큐브로 대체됨`)
     }
   }
+}
 
-  if (renderer) {
-    renderer.render(scene, camera)
+// 3D 상자 모델 생성
+const create3DBox = (placedObj: any, color: string) => {
+  console.log(`📦 3D 상자 생성: ${placedObj.name}`)
+  
+  // 파스텔 연한 갈색 색상 설정
+  const pastelBrown = '#E6D5AC' // 파스텔 연한 갈색
+  
+  // 상자 본체 (바닥과 벽만, 뚜껑 없음)
+  const boxGeometry = new THREE.BoxGeometry(placedObj.width, placedObj.height, placedObj.depth)
+  const boxMaterial = new THREE.MeshStandardMaterial({ 
+    color: pastelBrown,
+    transparent: true,
+    opacity: 0.9
+  })
+  const boxMesh = new THREE.Mesh(boxGeometry, boxMaterial)
+  
+  // 상자 그룹 생성 (뚜껑 없이)
+  const boxGroup = new THREE.Group()
+  boxGroup.add(boxMesh)
+  
+  // 위치 설정
+  boxGroup.position.set(placedObj.position.x, placedObj.height / 2, placedObj.position.y)
+  
+  // 회전 적용
+  boxGroup.rotation.y = placedObj.rotation || 0
+  
+  // 메타데이터 설정
+  boxGroup.userData = {
+    type: 'placed-object',
+    placedObjectId: placedObj.id,
+    objectName: placedObj.name,
+    category: placedObj.category,
+    isBox: true,
+    boxId: placedObj.id,
+    height: placedObj.height // 높이 정보 추가
   }
+  
+  scene.add(boxGroup)
+  console.log(`✅ 3D 상자 생성 완료: ${placedObj.name} (색상: ${pastelBrown}, 뚜껑 없음)`)
+}
+
+// 상자 위 오브젝트 배치 처리
+const handleObjectsOnBoxes = () => {
+  console.log('📦 상자 위 오브젝트 배치 처리 시작')
+  
+  // Store에서 상자와 모든 오브젝트 정보 가져오기
+  const storeObjects = floorplanStore.placedObjects
+  const boxes = storeObjects.filter(obj => obj.category === 'etc' && obj.isBox) // 상자는 isBox가 true
+  const allObjects = storeObjects.filter(obj => !obj.isBox) // 상자가 아닌 모든 오브젝트
+  
+  console.log(`📦 Store에서 발견된 상자 개수: ${boxes.length}`)
+  console.log(`📦 Store에서 발견된 모든 오브젝트 개수: ${allObjects.length}`)
+  console.log('📦 Store의 모든 오브젝트:', storeObjects.map(obj => ({
+    name: obj.name,
+    category: obj.category,
+    isBox: obj.isBox,
+    isOnBox: obj.isOnBox,
+    boxId: obj.boxId
+  })))
+  
+  // 3D 씬에서 해당 오브젝트들을 찾아서 위치 조정
+  boxes.forEach(boxData => {
+    console.log(`📦 상자 처리: ${boxData.name}, ID: ${boxData.id}`)
+    
+    // 3D 씬에서 상자 오브젝트 찾기
+    const box3D = scene.children.find(child => 
+      child.userData?.type === 'placed-object' && 
+      child.userData?.placedObjectId === boxData.id
+    )
+    
+    if (!box3D) {
+      console.log(`❌ 3D 씬에서 상자를 찾을 수 없음: ${boxData.name}`)
+      console.log('🔍 3D 씬의 모든 오브젝트:', scene.children.map(child => ({
+        type: child.userData?.type,
+        placedObjectId: child.userData?.placedObjectId,
+        objectName: child.userData?.objectName
+      })))
+      return
+    }
+    
+    const boxPosition = box3D.position
+    const boxHeight = boxData.height || 1.0
+    const boxWidth = boxData.width || 1.0
+    const boxDepth = boxData.depth || 1.0
+    
+    console.log(`📦 상자 3D 위치: (${boxPosition.x}, ${boxPosition.y}, ${boxPosition.z}), 크기: ${boxWidth}x${boxHeight}x${boxDepth}`)
+    
+    // 상자와 겹치는 모든 오브젝트 찾기
+    const overlappingObjects = allObjects.filter(objData => {
+      // 2D 평면에서 겹침 검사 (X, Z 좌표)
+      const objX = objData.position.x
+      const objZ = objData.position.y // Store의 Y가 3D의 Z
+      const objWidth = objData.width || 1.0
+      const objDepth = objData.depth || 1.0
+      
+      // 상자와 오브젝트의 경계 계산
+      const boxLeft = boxData.position.x - boxWidth / 2
+      const boxRight = boxData.position.x + boxWidth / 2
+      const boxTop = boxData.position.y - boxDepth / 2
+      const boxBottom = boxData.position.y + boxDepth / 2
+      
+      const objLeft = objX - objWidth / 2
+      const objRight = objX + objWidth / 2
+      const objTop = objZ - objDepth / 2
+      const objBottom = objZ + objDepth / 2
+      
+      // 겹침 검사
+      const overlapsX = !(objRight < boxLeft || objLeft > boxRight)
+      const overlapsZ = !(objBottom < boxTop || objTop > boxBottom)
+      
+      const isOverlapping = overlapsX && overlapsZ
+      
+      if (isOverlapping) {
+        console.log(`📦 ${objData.name}이 상자 ${boxData.name}와 겹침: (${objX}, ${objZ}) vs (${boxData.position.x}, ${boxData.position.y})`)
+      }
+      
+      return isOverlapping
+    })
+    
+    console.log(`📦 상자 ${boxData.name}와 겹치는 오브젝트 ${overlappingObjects.length}개 발견`)
+    
+    overlappingObjects.forEach(objData => {
+      // 3D 씬에서 해당 오브젝트 찾기
+      const obj3D = scene.children.find(child => 
+        child.userData?.type === 'placed-object' && 
+        child.userData?.placedObjectId === objData.id
+      )
+      
+      if (!obj3D) {
+        console.log(`❌ 3D 씬에서 오브젝트를 찾을 수 없음: ${objData.name}`)
+        console.log('🔍 3D 씬의 모든 오브젝트:', scene.children.map(child => ({
+          type: child.userData?.type,
+          placedObjectId: child.userData?.placedObjectId,
+          objectName: child.userData?.objectName
+        })))
+        return
+      }
+      
+      const objHeight = objData.height || 1.0
+      
+      // TV는 바닥에 붙어있는 오브젝트이므로 상자 위에 배치할 때는 높이를 조정
+      const isTV = objData.category === 'av'
+      let newY
+      
+      if (isTV) {
+        // TV는 상자 위에 바로 놓기 (TV의 높이를 고려하지 않음)
+        newY = boxPosition.y + boxHeight / 2
+        console.log(`📺 TV ${objData.name}을 상자 위에 바로 배치: Y=${newY} (상자높이:${boxHeight})`)
+      } else {
+        // 다른 오브젝트는 기존 로직 유지
+        newY = boxPosition.y + boxHeight / 2 + objHeight / 2
+        console.log(`📦 ${objData.name}을 상자 위로 이동: Y=${newY} (상자높이:${boxHeight}, 오브젝트높이:${objHeight})`)
+      }
+      
+      obj3D.position.y = newY
+      
+      // 상자의 회전도 오브젝트에 적용
+      if (box3D.rotation) {
+        obj3D.rotation.y = box3D.rotation.y
+      }
+      
+      console.log(`📦 ${objData.name}을 상자 위로 이동: Y=${newY} (상자높이:${boxHeight}, 오브젝트높이:${objHeight})`)
+    })
+  })
+  
+  console.log('✅ 상자 위 오브젝트 배치 처리 완료')
 }
 
 // Store를 사용한 Make3D - 2D 객체들을 상세한 3D로 변환
@@ -885,6 +1075,9 @@ const make3D = async () => {
     
     console.log('📦 오브젝트 생성 시작...')
     await create3DObjects(data.placedObjects || [])
+    
+    console.log('📦 상자 위 오브젝트 배치 처리...')
+    handleObjectsOnBoxes()
     
     console.log('✨ 추가 3D 기능 적용...')
     addEnhanced3DFeatures()

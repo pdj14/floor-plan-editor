@@ -106,10 +106,11 @@
     <!-- 상태바 -->
     <div class="statusbar">
       <span>🏠 Room Size: {{ roomWidth }}m × {{ roomHeight }}m</span>
-              <span>🛠️ Tool: {{ getCurrentToolName() }} {{ currentTool === 'select' ? '(Edit Mode)' : '(Draw Mode)' }}</span>
+      <span>🛠️ Tool: {{ getCurrentToolName() }} {{ currentTool === 'select' ? '(Edit Mode)' : '(Draw Mode)' }}</span>
       <span>📐 Grid: 1칸 = 50cm</span>
       <span>🖱️ Mouse: ({{ mousePosition.x }}, {{ mousePosition.y }})</span>
       <span v-if="floorplanStore.hasRoom">✅ Created: {{ floorplanStore.currentRoom?.width }}m × {{ floorplanStore.currentRoom?.height }}m</span>
+      <span v-if="boxPlacementMode" class="box-mode-indicator">📦 Box Mode: 장비를 상자 위에 배치할 수 있습니다</span>
     </div>
   </div>
 </template>
@@ -135,6 +136,8 @@ const roomHeight = ref(10) // 기본 세로 10m
 const currentTool = ref('select')
 const mousePosition = ref({ x: 0, y: 0 })
 const selectedObject = ref<any>(null)
+const selectedBox = ref<any>(null) // 선택된 상자
+const boxPlacementMode = ref(false) // 상자 위 장비 배치 모드
 
 
 // Store에서 직접 사용할 데이터들 (로컬 state 제거)
@@ -214,6 +217,19 @@ const initCanvas = () => {
     mousePosition.value = { 
       x: Math.round(pointer.x), 
       y: Math.round(pointer.y) 
+    }
+  })
+
+  // 오브젝트 이동 이벤트 리스너
+  fabricCanvas.on('object:modified', (e: any) => {
+    const modifiedObject = e.target
+    if (modifiedObject && modifiedObject.userData?.type === 'placed-object') {
+      updatePlacedObjectInStore(modifiedObject)
+      
+      // 상자가 이동하거나 회전한 경우 그 위의 장비들도 함께 이동/회전
+      if (modifiedObject.userData?.category === 'etc' && modifiedObject.userData?.isBox) {
+        moveObjectsOnBox(modifiedObject)
+      }
     }
   })
 
@@ -298,6 +314,29 @@ const setupWallDrawing = () => {
     if (selected && selected.userData?.type === 'placed-object') {
       selectedObject.value = selected
       console.log('✅ 배치된 오브젝트 선택:', selected.userData?.placedObjectId)
+      
+      // ETC 상자가 선택된 경우 상자 위 장비 배치 모드 활성화
+      if (selected.userData?.category === 'etc' && selected.userData?.isBox) {
+        selectedBox.value = selected
+        boxPlacementMode.value = true
+        console.log('📦 상자 선택됨 - 장비 배치 모드 활성화')
+      } else {
+        // 상자가 아닌 오브젝트 선택 시 상자 모드 비활성화
+        selectedBox.value = null
+        boxPlacementMode.value = false
+        
+        // 상자 위에 배치된 장비가 선택된 경우 해당 상자도 함께 선택
+        if (selected.userData?.isOnBox && selected.userData?.boxId) {
+          const fabricObjects = fabricCanvas.getObjects()
+          const boxObject = fabricObjects.find((fabricObj: any) => 
+            fabricObj.userData?.placedObjectId === selected.userData?.boxId
+          )
+          if (boxObject) {
+            fabricCanvas.setActiveObject(boxObject)
+            console.log('📦 상자 위 장비 선택으로 인한 상자도 함께 선택')
+          }
+        }
+      }
       return
     }
     
@@ -976,7 +1015,7 @@ const rerender2DObjectsFromStore = () => {
       top: fabricY - (placedObj.depth * 40) / 2,
       width: placedObj.width * 40,
       height: placedObj.depth * 40,
-      fill: placedObj.color || getObjectColor(placedObj.category),
+      fill: placedObj.color || getObjectColor(placedObj.category, placedObj.isOnBox),
       stroke: '#333',
       strokeWidth: 1,
       selectable: true,
@@ -1021,6 +1060,53 @@ const rerender2DObjectsFromStore = () => {
   console.log(`✅ 2D Store 기반 재구성 완료 (${floorplanStore.placedObjects.length}개 오브젝트)`)
 }
 
+// 상자 위의 장비들을 상자와 함께 이동
+const moveObjectsOnBox = (boxObject: any) => {
+  if (!boxObject || boxObject.userData?.category !== 'etc' || !boxObject.userData?.isBox) return
+  
+  const boxId = boxObject.userData?.placedObjectId
+  if (!boxId) return
+  
+  // 상자 위에 있는 모든 장비 찾기
+  const objectsOnBox = floorplanStore.placedObjects.filter(obj => obj.boxId === boxId)
+  
+  objectsOnBox.forEach(obj => {
+    // 해당 장비의 Fabric.js 오브젝트 찾기
+    const fabricObjects = fabricCanvas?.getObjects() || []
+    const fabricObject = fabricObjects.find((fabricObj: any) => 
+      fabricObj.userData?.placedObjectId === obj.id
+    )
+    
+    if (fabricObject) {
+      // 상자의 새로운 위치에 맞춰 장비 위치 업데이트
+      const boxLeft = boxObject.left || 0
+      const boxTop = boxObject.top || 0
+      
+      fabricObject.set({
+        left: boxLeft,
+        top: boxTop - 20, // 상자 위쪽에 약간 올려서 배치
+        angle: boxObject.angle || 0 // 상자와 같은 회전각 적용
+      })
+      
+      // Store도 업데이트
+      const canvasWidth = fabricCanvas?.width || 800
+      const canvasHeight = fabricCanvas?.height || 600
+      const worldX = (boxLeft - canvasWidth / 2) / 40
+      const worldY = (boxTop - canvasHeight / 2) / 40
+      
+      const updatedObject = {
+        ...obj,
+        position: { x: worldX, y: worldY },
+        rotation: (boxObject.angle || 0) * (Math.PI / 180) // 상자와 같은 회전각 (라디안)
+      }
+      floorplanStore.updatePlacedObject(obj.id, updatedObject)
+    }
+  })
+  
+  fabricCanvas?.renderAll()
+  console.log(`📦 상자 이동으로 인한 장비 ${objectsOnBox.length}개 이동 완료`)
+}
+
 // Store에서 배치된 오브젝트 정보 업데이트
 const updatePlacedObjectInStore = (fabricObject: any) => {
   if (!fabricObject || !fabricObject.userData?.placedObjectId) return
@@ -1060,22 +1146,45 @@ const handlePlaceObject = (event: any) => {
   
   const { object } = event.detail
   
-  // 캔버스 중앙에 배치
-  const canvasWidth = fabricCanvas.width || 800
-  const canvasHeight = fabricCanvas.height || 600
-  const centerX = canvasWidth / 2
-  const centerY = canvasHeight / 2
+  let centerX: number
+  let centerY: number
+  
+  // 상자 위 배치 모드인 경우 상자 위에 배치
+  if (boxPlacementMode.value && selectedBox.value && object.category !== 'etc') {
+    const box = selectedBox.value
+    const boxLeft = box.left || 0
+    const boxTop = box.top || 0
+    
+    // 상자 위 중앙에 배치
+    centerX = boxLeft
+    centerY = boxTop - 20 // 상자 위쪽에 약간 올려서 배치
+    
+    console.log('📦 상자 위에 장비 배치:', object.name, '위치:', centerX, centerY)
+  } else {
+    // 일반 배치 - 캔버스 중앙에 배치
+    const canvasWidth = fabricCanvas.width || 800
+    const canvasHeight = fabricCanvas.height || 600
+    centerX = canvasWidth / 2
+    centerY = canvasHeight / 2
+  }
   
   // 오브젝트 크기 (미터 단위를 픽셀로 변환) - 2D에서는 width(가로), depth(세로) 사용
   const meterToPixel = 40 // 1m = 40px
-  const objectWidth = (object.width || 1) * meterToPixel   // 가로
-  const objectHeight = (object.depth || 1) * meterToPixel  // 세로 (2D 표현용)
+  let objectWidth = (object.width || 1) * meterToPixel   // 가로
+  let objectHeight = (object.depth || 1) * meterToPixel  // 세로 (2D 표현용)
+  
+  // 상자 위 배치인 경우 크기를 약간 작게 조정
+  if (boxPlacementMode.value && selectedBox.value && object.category !== 'etc') {
+    objectWidth *= 0.8
+    objectHeight *= 0.8
+  }
   
   // 카테고리별 색상 및 모양 설정
   let objectShape: any
   // GLB에서 추출한 색상이 있으면 사용, 없으면 카테고리 기본 색상 사용
-  const objectColor = object.color || getObjectColor(object.category)
-  const objectIcon = getObjectIcon(object.category)
+  const isBox = object.isBox || false
+  const objectColor = object.color || getObjectColor(object.category, isBox)
+  const objectIcon = getObjectIcon(object.category, isBox)
   
   // 사각형으로 오브젝트 표현 (추후 이미지나 복잡한 도형으로 확장 가능)
   objectShape = new fabric.Rect({
@@ -1088,14 +1197,17 @@ const handlePlaceObject = (event: any) => {
     strokeWidth: 2,
     angle: 0,
     originX: 'center',
-    originY: 'center'
+    originY: 'center',
+    shadow: boxPlacementMode.value && selectedBox.value && object.category !== 'etc' 
+      ? new fabric.Shadow({ color: 'rgba(0,0,0,0.3)', blur: 4, offsetX: 2, offsetY: 2 })
+      : null
   })
   
   // 오브젝트 이름 레이블 추가
   const nameLabel = new fabric.Text(`${objectIcon} ${object.name}`, {
     left: 0, // 그룹 내에서의 상대 위치
     top: objectHeight / 2 + 10, // 오브젝트 아래쪽에 배치
-    fontSize: 10,
+    fontSize: boxPlacementMode.value && selectedBox.value && object.category !== 'etc' ? 8 : 10,
     fill: '#333',
     fontFamily: 'Arial',
     textAlign: 'center',
@@ -1124,17 +1236,20 @@ const handlePlaceObject = (event: any) => {
     lockScalingY: true,
     lockUniScaling: true,
     hasRotatingPoint: true,
-    userData: {
-      type: 'placed-object',
-      placedObjectId: placedObjectId,
-      objectId: object.id,
-      objectName: object.name,
-      category: object.category,
-      glbUrl: object.glbUrl,
-      description: object.description,
-      width: object.width,
-      height: object.height
-    }
+          userData: {
+        type: 'placed-object',
+        placedObjectId: placedObjectId,
+        objectId: object.id,
+        objectName: object.name,
+        category: object.category,
+        glbUrl: object.glbUrl,
+        description: object.description,
+        width: object.width,
+        height: object.height,
+        isOnBox: boxPlacementMode.value && selectedBox.value && object.category !== 'etc',
+        boxId: boxPlacementMode.value && selectedBox.value ? selectedBox.value.userData?.placedObjectId : null,
+        depth: object.depth // 3D에서 사용할 깊이 정보 추가
+      }
   })
   
   // 크기 조정 핸들만 숨기고 회전 핸들은 유지
@@ -1164,11 +1279,14 @@ const handlePlaceObject = (event: any) => {
     depth: object.depth || 1,    // 세로 (2D Y축)
     height: object.height || 2,  // 높이 (3D에서만 사용)
     position: {
-      x: (centerX - canvasWidth / 2) / 40,  // 벽과 동일한 좌표 변환
-      y: (centerY - canvasHeight / 2) / 40  // 벽과 동일한 좌표 변환
+      x: (centerX - (fabricCanvas.width || 800) / 2) / 40,  // 벽과 동일한 좌표 변환
+      y: (centerY - (fabricCanvas.height || 600) / 2) / 40  // 벽과 동일한 좌표 변환
     },
     rotation: 0, // 초기 회전값
-    color: object.color // GLB에서 추출한 색상 (있다면)
+    color: object.color, // GLB에서 추출한 색상 (있다면)
+    isOnBox: boxPlacementMode.value && selectedBox.value && object.category !== 'etc', // 상자 위 배치 여부
+    boxId: boxPlacementMode.value && selectedBox.value ? selectedBox.value.userData?.placedObjectId : null, // 상자 ID
+    isBox: object.isBox || false // 상자 여부
   }
   
   console.log('📦 Store에 오브젝트 추가 중:', placedObjectData)
@@ -1182,28 +1300,34 @@ const handlePlaceObject = (event: any) => {
   rerender2DObjectsFromStore()
   console.log('✅ Store 기반 2D 재구성 완료')
   
-  // 배치 완료 알림
-  alert(`${object.name}이(가) 2D 뷰에 배치되었습니다!`)
+  // 상자 위 배치 후 상자 모드 비활성화
+  if (boxPlacementMode.value) {
+    boxPlacementMode.value = false
+    selectedBox.value = null
+    console.log('📦 상자 위 배치 완료 - 상자 모드 비활성화')
+  }
+  
+  // 배치 완료 (알림 제거)
 }
 
 // 카테고리별 색상 반환
-const getObjectColor = (category: string): string => {
+const getObjectColor = (category: string, isBox?: boolean): string => {
   const colorMap: { [key: string]: string } = {
     robot: '#FF6B6B',     // 빨간색 계열
     equipment: '#4ECDC4',  // 청록색 계열
     appliances: '#45B7D1', // 파란색 계열
-    etc: '#96CEB4'        // 녹색 계열
+    etc: isBox ? '#D2B48C' : '#96CEB4'  // 상자는 파스텔 브라운, 일반 ETC는 녹색
   }
   return colorMap[category] || '#CCCCCC'
 }
 
 // 카테고리별 아이콘 반환
-const getObjectIcon = (category: string): string => {
+const getObjectIcon = (category: string, isBox?: boolean): string => {
   const iconMap: { [key: string]: string } = {
     robot: '🤖',
     equipment: '⚙️',
     appliances: '🔌',
-    etc: '📦'
+    etc: isBox ? '📦' : '📂'  // 상자는 📦, 일반 ETC는 📂
   }
   return iconMap[category] || '📦'
 }
@@ -1280,6 +1404,26 @@ const deleteSelectedObject = () => {
     if (placedObjectId) {
       console.log(`🗑️ Store 제거 전 개수: ${floorplanStore.placedObjects.length}`)
       console.log(`🗑️ Store 제거 전 오브젝트들:`, floorplanStore.placedObjects.map(obj => obj.id))
+      
+      // 상자가 삭제되는 경우 그 위의 장비들도 함께 삭제
+      if (objectToDelete.userData?.category === 'etc' && objectToDelete.userData?.isBox) {
+        const objectsOnBox = floorplanStore.placedObjects.filter(obj => obj.boxId === placedObjectId)
+        console.log(`📦 상자 위의 장비 ${objectsOnBox.length}개도 함께 삭제`)
+        
+        objectsOnBox.forEach(obj => {
+          // Fabric.js에서도 제거
+          const fabricObjects = fabricCanvas.getObjects()
+          const fabricObject = fabricObjects.find((fabricObj: any) => 
+            fabricObj.userData?.placedObjectId === obj.id
+          )
+          if (fabricObject) {
+            fabricCanvas.remove(fabricObject)
+          }
+          
+          // Store에서 제거
+          floorplanStore.removePlacedObject(obj.id)
+        })
+      }
       
       floorplanStore.removePlacedObject(placedObjectId)
       
@@ -1615,5 +1759,21 @@ onUnmounted(() => {
 /* 유효하지 않은 입력 스타일 */
 .input-group input:invalid {
   border-color: #e74c3c;
+}
+
+/* 상자 모드 표시 스타일 */
+.box-mode-indicator {
+  background: #D2B48C;
+  color: #8B4513;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-weight: bold;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.7; }
+  100% { opacity: 1; }
 }
 </style> 
