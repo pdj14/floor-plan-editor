@@ -736,47 +736,35 @@ const create3DObjects = async (placedObjects: any[]) => {
       })
       console.log(`🔍 총 Mesh 개수: ${meshCount}`)
       
-      // GLB 색상 강화 적용 (벽과 구분되도록)
-      console.log(`=== ${placedObj.name} GLB 색상 처리 시작 ===`)
+      // GLB 원본 색상 보존 (색상 변경 없음)
+      console.log(`=== ${placedObj.name} GLB 원본 색상 보존 ===`)
       logOnlyOriginalMaterials(model) // 원본 재질 로그
       
-      // GLB 원본 색상 강제 적용 (추출된 색상으로 명시적 설정)
-      console.log(`🎨 GLB 추출 색상 강제 적용: ${extractedColor}`)
-      console.log(`✨ 추출된 색상을 모든 재질에 명시적으로 적용`)
+      console.log(`🎨 GLB 원본 색상 100% 보존 - 색상 변경 없음`)
+      console.log(`✨ 디자이너가 의도한 원본 재질과 색상을 그대로 사용`)
       
-      // GLB 추출 색상을 모든 재질에 강제 적용
-      let appliedMaterialCount = 0
-      const extractedColorRGB = new THREE.Color(extractedColor)
+      // GLB 원본 재질과 색상을 그대로 보존 (색상 변경 없음)
+      let materialCount = 0
       
       model.traverse((child: any) => {
         if (child.isMesh && child.material) {
-          appliedMaterialCount++
+          materialCount++
           
           if (Array.isArray(child.material)) {
             child.material.forEach((mat: any, index: number) => {
               console.log(`  재질[${index}] ${mat.type}: 원본 RGB(${mat.color?.r.toFixed(3) || 'N/A'}, ${mat.color?.g.toFixed(3) || 'N/A'}, ${mat.color?.b.toFixed(3) || 'N/A'})`)
-              
-              // 추출된 색상으로 강제 적용
-              mat.color = extractedColorRGB.clone()
-              mat.needsUpdate = true
-              
-              console.log(`  → 적용된 색상: ${extractedColor} (RGB: ${extractedColorRGB.r.toFixed(3)}, ${extractedColorRGB.g.toFixed(3)}, ${extractedColorRGB.b.toFixed(3)})`)
+              console.log(`  → 원본 색상 보존됨 (변경 없음)`)
             })
           } else {
             console.log(`  재질 ${child.material.type}: 원본 RGB(${child.material.color?.r.toFixed(3) || 'N/A'}, ${child.material.color?.g.toFixed(3) || 'N/A'}, ${child.material.color?.b.toFixed(3) || 'N/A'})`)
-            
-            // 추출된 색상으로 강제 적용
-            child.material.color = extractedColorRGB.clone()
-            child.material.needsUpdate = true
-            
-            console.log(`  → 적용된 색상: ${extractedColor} (RGB: ${extractedColorRGB.r.toFixed(3)}, ${extractedColorRGB.g.toFixed(3)}, ${extractedColorRGB.b.toFixed(3)})`)
+            console.log(`  → 원본 색상 보존됨 (변경 없음)`)
           }
         }
       })
       
-      console.log(`✅ ${appliedMaterialCount}개 재질에 추출 색상 ${extractedColor} 강제 적용 완료`)
+      console.log(`✅ ${materialCount}개 재질의 원본 색상 보존 완료`)
       
-      console.log(`=== ${placedObj.name} GLB 색상 처리 완료 ===`)
+      console.log(`=== ${placedObj.name} GLB 원본 색상 보존 완료 ===`)
       
       // 모델 크기 조정 (width, depth, height 기준) - 먼저 스케일 적용
       const box = new THREE.Box3().setFromObject(model)

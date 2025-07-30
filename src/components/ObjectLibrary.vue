@@ -398,6 +398,42 @@ const defaultObjects: GameObject[] = [
     height: 0.84  // 높이 (화면 높이) - TV는 세로가 더 큼
   },
   {
+    id: 'default-robot-vacuum',
+    name: '로봇청소기',
+    category: 'appliances',
+    glbUrl: '/로봇청소기.glb',
+    thumbnail: '/로봇청소기.png',
+    description: '스마트 로봇 청소기',
+    size: '0.35m × 0.35m × 0.08m',
+    width: 0.35,  // 가로 (지름)
+    depth: 0.35,  // 세로 (지름)
+    height: 0.08  // 높이 (두께)
+  },
+  {
+    id: 'default-washing-machine',
+    name: '세탁기',
+    category: 'appliances',
+    glbUrl: '/세탁기.glb',
+    thumbnail: '/세탁기.png',
+    description: '드럼 세탁기',
+    size: '0.6m × 0.6m × 0.85m',
+    width: 0.6,   // 가로
+    depth: 0.6,   // 세로
+    height: 0.85  // 높이
+  },
+  {
+    id: 'default-family-hub',
+    name: 'FamilyHub',
+    category: 'appliances',
+    glbUrl: '/패밀리허브.glb',
+    thumbnail: '/패밀리허브.png',
+    description: '스마트 패밀리 허브 냉장고',
+    size: '1.2m × 1.0m × 2.2m',
+    width: 1.2,   // 가로
+    depth: 1.0,   // 세로
+    height: 2.2   // 높이
+  },
+  {
     id: 'default-box',
     name: '상자',
     category: 'etc',

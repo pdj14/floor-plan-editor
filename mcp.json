@@ -5,6 +5,9 @@
             "args": [
             "tripo-mcp"
             ]
-         }
+         },
+        "blender-mcp": {
+            "command": "blender-mcp"
+        }
      }
 }
