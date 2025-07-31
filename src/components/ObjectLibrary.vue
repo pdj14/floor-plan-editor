@@ -349,18 +349,7 @@ let selectedThumbnail: File | null = null
 
 // 기본 오브젝트들
 const defaultObjects: GameObject[] = [
-  {
-    id: 'default-refrigerator',
-    name: '냉장고',
-    category: 'appliances',
-    glbUrl: '/pearl_refrigerator_final.glb',
-    thumbnail: '/냉장고1.png',
-    description: '가정용 양문냉장고',
-    size: '1.2m × 1.0m × 2.0m',
-    width: 1.2,
-    depth: 1.0,
-    height: 2.0
-  },
+  
   {
     id: 'default-robot-arm',
     name: 'Robot Arm',
@@ -374,6 +363,18 @@ const defaultObjects: GameObject[] = [
     height: 0.8
   },
   {
+    id: 'default-robot2',
+    name: '로봇2',
+    category: 'robot',
+    glbUrl: '/로봇2.glb',
+    thumbnail: '/로봇2.png',
+    description: '로봇2',
+    size: '1.0m × 1.0m × 1.5m',
+    width: 1.0,
+    depth: 1.0,
+    height: 1.5
+  },
+  {
     id: 'default-txi-equipment',
     name: 'TXI',
     category: 'equipment',
@@ -384,6 +385,42 @@ const defaultObjects: GameObject[] = [
     width: 5.0,
     depth: 3.0,
     height: 1.0
+  },
+  {
+    id: 'default-rack1',
+    name: 'Rack1',
+    category: 'equipment',
+    glbUrl: '/Rack1.glb',
+    thumbnail: '/Rack1.png',
+    description: 'Rack1 설비',
+    size: '2.0m ×1.0m × 2.0m',
+    width: 2.0,
+    depth: 1.0,
+    height: 2.0
+  },
+  {
+    id: 'default-rack2',
+    name: 'Rack2',
+    category: 'equipment',
+    glbUrl: '/Rack2.glb',
+    thumbnail: '/Rack2.png',
+    description: 'Rack2 설비',
+    size: '0.8m × 3.0m × 2.0m',
+    width: 0.8,
+    depth: 3.0,
+    height: 2.0
+  },
+  {
+    id: 'default-equipment2',
+    name: '설비2',
+    category: 'equipment',
+    glbUrl: '/설비2.glb',
+    thumbnail: '/설비2.png',
+    description: '설비2',
+    size: '1.0m × 2.0m × 2.0m',
+    width: 1.0,
+    depth: 2.0,
+    height: 2.0
   },
   {
     id: 'default-tv',
@@ -432,6 +469,18 @@ const defaultObjects: GameObject[] = [
     width: 1.2,   // 가로
     depth: 1.0,   // 세로
     height: 2.2   // 높이
+  },
+  {
+    id: 'default-refrigerator',
+    name: '냉장고',
+    category: 'appliances',
+    glbUrl: '/pearl_refrigerator_final.glb',
+    thumbnail: '/냉장고1.png',
+    description: '가정용 양문냉장고',
+    size: '1.2m × 1.0m × 2.0m',
+    width: 1.2,
+    depth: 1.0,
+    height: 2.0
   },
   {
     id: 'default-box',

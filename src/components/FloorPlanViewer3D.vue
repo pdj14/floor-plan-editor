@@ -107,11 +107,11 @@ const initThreeJS = () => {
   scene = new THREE.Scene()
   scene.background = new THREE.Color(0xf0f0f0)
 
-  // 카메라 생성
-  camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000)
+  // 카메라 생성 (확장된 범위에 맞게 조정)
+  camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 2000)
   
-  // 초기 카메라 위치: 약간 비스듬히 내려다보는 뷰 (더 자연스러움)
-  camera.position.set(0, 15, 0)  // 대각선 위에서 내려다보기
+  // 초기 카메라 위치: 더 넓은 시야를 위한 높은 위치
+  camera.position.set(0, 25, 0)  // 더 높은 위치에서 내려다보기 (15 → 25)
   camera.lookAt(0, 0, 0)
   // camera.up 설정을 기본값(0, 1, 0)으로 유지
 
@@ -143,7 +143,7 @@ const initThreeJS = () => {
   controls.dampingFactor = 0.25
   
   // 카메라 각도 제한
-  controls.maxPolarAngle = Math.PI / 2 // 지면 아래로 볼 수 없도록 제한
+  controls.maxPolarAngle = Math.PI / 2.5// 30도 위쪽에서만 보기 (지면 아래로 볼 수 없도록 제한)
   controls.minPolarAngle = 0 // 위쪽 제한
   controls.target.set(0, 0, 0)  // 초기 타겟
   
@@ -160,14 +160,14 @@ const initThreeJS = () => {
     RIGHT: THREE.MOUSE.PAN       // 우클릭: 이동
   }
   
-  // 컨트롤 속도 최적화
+  // 컨트롤 속도 최적화 (확장된 범위에 맞게 조정)
   controls.rotateSpeed = 1.0
-  controls.zoomSpeed = 1.5
-  controls.panSpeed = 1.2
+  controls.zoomSpeed = 2.0  // 줌 속도 증가 (1.5 → 2.0)
+  controls.panSpeed = 1.5   // 패닝 속도 증가 (1.2 → 1.5)
   
-  // 카메라 이동 범위 설정
-  controls.maxDistance = 50  // 최대 줌 아웃 거리
-  controls.minDistance = 1   // 최소 줌 인 거리
+  // 카메라 이동 범위 설정 (조정된 범위)
+  controls.maxDistance = 150 // 최대 줌 아웃 거리 (500 → 300으로 조정)
+  controls.minDistance = 0.05 // 최소 줌 인 거리 (0.1 → 0.05로 더 가까이 접근 가능)
   
   // 컨트롤 초기화 완료
   controls.update()

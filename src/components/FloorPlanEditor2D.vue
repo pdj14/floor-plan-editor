@@ -11,7 +11,7 @@
               v-model.number="roomWidth" 
               type="number" 
               min="1" 
-              max="20" 
+              max="300" 
               step="0.5"
               placeholder="가로"
             />
@@ -22,7 +22,7 @@
               v-model.number="roomHeight" 
               type="number" 
               min="1" 
-              max="20" 
+              max="300" 
               step="0.5"
               placeholder="세로"
             />
@@ -89,6 +89,9 @@
       </div>
       
       <div class="tool-group">
+        <button @click="resetView" class="btn btn-secondary" title="Reset zoom and pan">
+          🔍 Reset View
+        </button>
         <button @click="clearCanvas" class="btn btn-secondary">
           🗑️ Clear
         </button>
@@ -109,6 +112,8 @@
       <span>🛠️ Tool: {{ getCurrentToolName() }} {{ currentTool === 'select' ? '(Edit Mode)' : '(Draw Mode)' }}</span>
       <span>📐 Grid: 1칸 = 50cm</span>
       <span>🖱️ Mouse: ({{ mousePosition.x }}, {{ mousePosition.y }})</span>
+      <span>🔍 Zoom: {{ (zoom * 100).toFixed(0) }}%</span>
+      <span>📱 Pan: ({{ pan.x.toFixed(0) }}, {{ pan.y.toFixed(0) }})</span>
       <span v-if="floorplanStore.hasRoom">✅ Created: {{ floorplanStore.currentRoom?.width }}m × {{ floorplanStore.currentRoom?.height }}m</span>
       <span v-if="boxPlacementMode" class="box-mode-indicator">📦 Box Mode: 장비를 상자 위에 배치할 수 있습니다</span>
     </div>
@@ -139,6 +144,12 @@ const selectedObject = ref<any>(null)
 const selectedBox = ref<any>(null) // 선택된 상자
 const boxPlacementMode = ref(false) // 상자 위 장비 배치 모드
 
+// 확대/축소 및 이동 관련 상태
+const zoom = ref(1)
+const pan = ref({ x: 0, y: 0 })
+const isPanning = ref(false)
+const lastPanPoint = ref({ x: 0, y: 0 })
+
 
 // Store에서 직접 사용할 데이터들 (로컬 state 제거)
 // const currentRoom = ref<{width: number, height: number, bounds?: any} | null>(null) -> store 사용
@@ -147,7 +158,7 @@ const boxPlacementMode = ref(false) // 상자 위 장비 배치 모드
 // 크기 유효성 검사
 const isValidSize = computed(() => {
   return roomWidth.value > 0 && roomHeight.value > 0 && 
-         roomWidth.value <= 20 && roomHeight.value <= 20
+         roomWidth.value <= 300 && roomHeight.value <= 300
 })
 
 // 현재 도구 이름
@@ -210,6 +221,11 @@ const initCanvas = () => {
   
   // 그리드 배경 추가
   addGrid()
+  
+  // 초기 커서 스타일 설정
+  if (canvasWrapper.value) {
+    canvasWrapper.value.classList.remove('drawing-mode')
+  }
 
   // 이벤트 리스너
   fabricCanvas.on('mouse:move', (e: any) => {
@@ -217,6 +233,28 @@ const initCanvas = () => {
     mousePosition.value = { 
       x: Math.round(pointer.x), 
       y: Math.round(pointer.y) 
+    }
+  })
+  
+  // 패닝을 위한 별도의 mousemove 이벤트
+  fabricCanvas.upperCanvasEl.addEventListener('mousemove', (e: any) => {
+    if (isPanning.value) {
+      const deltaX = e.clientX - lastPanPoint.value.x
+      const deltaY = e.clientY - lastPanPoint.value.y
+      
+      pan.value.x += deltaX
+      pan.value.y += deltaY
+      lastPanPoint.value = { x: e.clientX, y: e.clientY }
+      
+      console.log('패닝 중:', { 
+        deltaX, 
+        deltaY, 
+        pan: pan.value, 
+        clientX: e.clientX,
+        clientY: e.clientY
+      })
+      
+      updateCanvasTransform()
     }
   })
 
@@ -235,6 +273,9 @@ const initCanvas = () => {
 
   // 벽 그리기 이벤트 설정
   setupWallDrawing()
+  
+  // 확대/축소 및 이동 이벤트 설정
+  setupZoomAndPanEvents()
 
   // 다중 키보드 이벤트 설정 (더 확실하게)
   setupKeyboardEvents()
@@ -294,6 +335,88 @@ const handleCanvasKeydown = (e: KeyboardEvent) => {
       e.preventDefault()
     deleteSelectedObject()
   }
+}
+
+// 확대/축소 및 이동 이벤트 설정
+const setupZoomAndPanEvents = () => {
+  if (!fabricCanvas) return
+  
+  // 마우스 휠 이벤트 (확대/축소)
+  fabricCanvas.on('mouse:wheel', (e: any) => {
+    e.e.preventDefault()
+    
+    // 벽 그리기 모드에서는 확대/축소 비활성화
+    if (currentTool.value === 'wall') {
+      return
+    }
+    
+    const delta = e.e.deltaY
+    const zoomFactor = 0.1
+    const newZoom = delta > 0 ? zoom.value * (1 - zoomFactor) : zoom.value * (1 + zoomFactor)
+    
+    // 최소/최대 확대 제한
+    const minZoom = 0.1
+    const maxZoom = 5
+    zoom.value = Math.max(minZoom, Math.min(maxZoom, newZoom))
+    
+    updateCanvasTransform()
+  })
+  
+  // 마우스 오른쪽 클릭 이벤트 (이동) - 네이티브 DOM 이벤트 사용
+  fabricCanvas.upperCanvasEl.addEventListener('mousedown', (e: any) => {
+    if (e.button === 2) { // 오른쪽 클릭
+      e.preventDefault()
+      
+      // 벽 그리기 모드에서는 이동 비활성화
+      if (currentTool.value === 'wall') {
+        return
+      }
+      
+      isPanning.value = true
+      const rect = fabricCanvas.upperCanvasEl.getBoundingClientRect()
+      lastPanPoint.value = { x: e.clientX, y: e.clientY }
+      fabricCanvas.defaultCursor = 'grabbing'
+      
+      console.log('패닝 시작:', { 
+        clientX: e.clientX, 
+        clientY: e.clientY, 
+        isPanning: isPanning.value 
+      })
+    }
+  })
+  
+  fabricCanvas.upperCanvasEl.addEventListener('mouseup', (e: any) => {
+    if (e.button === 2) { // 오른쪽 클릭 해제
+      isPanning.value = false
+      fabricCanvas.defaultCursor = 'default'
+      console.log('패닝 종료:', { isPanning: isPanning.value })
+    }
+  })
+  
+  // 컨텍스트 메뉴 비활성화
+  fabricCanvas.upperCanvasEl.addEventListener('contextmenu', (e: any) => {
+    e.preventDefault()
+  })
+}
+
+// 캔버스 변환 업데이트 (확대/축소 및 이동)
+const updateCanvasTransform = () => {
+  if (!fabricCanvas) return
+  
+  // 캔버스 뷰포트 변환
+  fabricCanvas.setViewportTransform([
+    zoom.value,
+    0,
+    0,
+    zoom.value,
+    pan.value.x,
+    pan.value.y
+  ])
+  
+  // 그리드 업데이트
+  updateGrid()
+  
+  fabricCanvas.renderAll()
 }
 
 // 벽 그리기 이벤트 설정
@@ -433,8 +556,8 @@ const setupWallDrawing = () => {
     startPoint = pointer
 
     currentLine = new fabric.Line([pointer.x, pointer.y, pointer.x, pointer.y], {
-      stroke: '#999999',
-      strokeWidth: 3,
+      stroke: '#666666',
+      strokeWidth: 3 / zoom.value, // 확대/축소에 따른 선 두께 조정
       strokeLineCap: 'round',
       selectable: false,
       evented: false,
@@ -530,7 +653,7 @@ const addGrid = () => {
   // 세로선 (50cm 간격)
   for (let i = 0; i <= width; i += gridSize) {
     lines.push(new fabric.Line([i, 0, i, height], {
-      stroke: '#f0f0f0',
+      stroke: '#c0c0c0',
       strokeWidth: 1,
       selectable: false,
       evented: false,
@@ -540,7 +663,7 @@ const addGrid = () => {
   // 가로선 (50cm 간격)
   for (let i = 0; i <= height; i += gridSize) {
     lines.push(new fabric.Line([0, i, width, i], {
-      stroke: '#f0f0f0',
+      stroke: '#c0c0c0',
       strokeWidth: 1,
       selectable: false,
       evented: false,
@@ -550,7 +673,7 @@ const addGrid = () => {
   // 굵은 그리드 (2.5m 간격)
   for (let i = 0; i <= width; i += gridSize * 5) {
     lines.push(new fabric.Line([i, 0, i, height], {
-      stroke: '#d0d0d0',
+      stroke: '#a0a0a0',
       strokeWidth: 2,
       selectable: false,
       evented: false,
@@ -559,7 +682,7 @@ const addGrid = () => {
 
   for (let i = 0; i <= height; i += gridSize * 5) {
     lines.push(new fabric.Line([0, i, width, i], {
-      stroke: '#d0d0d0',
+      stroke: '#a0a0a0',
       strokeWidth: 2,
       selectable: false,
       evented: false,
@@ -575,6 +698,87 @@ const addGrid = () => {
   fabricCanvas.sendToBack(grid)
 }
 
+// 확대/축소 및 이동에 따른 그리드 업데이트
+const updateGrid = () => {
+  if (!fabricCanvas) return
+  
+  // 기존 그리드 제거
+  const existingGrid = fabricCanvas.getObjects().find((obj: any) => 
+    obj.type === 'group' && obj.getObjects().some((line: any) => line.type === 'line')
+  )
+  
+  if (existingGrid) {
+    fabricCanvas.remove(existingGrid)
+  }
+  
+  // 새로운 그리드 생성 (확대/축소 및 이동을 고려한 확장된 영역)
+  const gridSize = 20 * zoom.value // 확대/축소에 따른 그리드 크기 조정
+  const canvasWidth = fabricCanvas.width!
+  const canvasHeight = fabricCanvas.height!
+  
+  // 뷰포트 영역 계산
+  const viewportLeft = -pan.value.x / zoom.value
+  const viewportTop = -pan.value.y / zoom.value
+  const viewportRight = viewportLeft + canvasWidth / zoom.value
+  const viewportBottom = viewportTop + canvasHeight / zoom.value
+  
+  // 그리드 시작/끝 위치 계산 (여백 포함)
+  const margin = 1000 // 여백 크기
+  const startX = Math.floor((viewportLeft - margin) / gridSize) * gridSize
+  const endX = Math.ceil((viewportRight + margin) / gridSize) * gridSize
+  const startY = Math.floor((viewportTop - margin) / gridSize) * gridSize
+  const endY = Math.ceil((viewportBottom + margin) / gridSize) * gridSize
+  
+  const lines = []
+  
+  // 세로선 (50cm 간격)
+  for (let i = startX; i <= endX; i += gridSize) {
+    lines.push(new fabric.Line([i, startY, i, endY], {
+      stroke: '#c0c0c0',
+      strokeWidth: 1,
+      selectable: false,
+      evented: false,
+    }))
+  }
+  
+  // 가로선 (50cm 간격)
+  for (let i = startY; i <= endY; i += gridSize) {
+    lines.push(new fabric.Line([startX, i, endX, i], {
+      stroke: '#c0c0c0',
+      strokeWidth: 1,
+      selectable: false,
+      evented: false,
+    }))
+  }
+  
+  // 굵은 그리드 (2.5m 간격)
+  for (let i = startX; i <= endX; i += gridSize * 5) {
+    lines.push(new fabric.Line([i, startY, i, endY], {
+      stroke: '#a0a0a0',
+      strokeWidth: 2,
+      selectable: false,
+      evented: false,
+    }))
+  }
+  
+  for (let i = startY; i <= endY; i += gridSize * 5) {
+    lines.push(new fabric.Line([startX, i, endX, i], {
+      stroke: '#a0a0a0',
+      strokeWidth: 2,
+      selectable: false,
+      evented: false,
+    }))
+  }
+  
+  const grid = new fabric.Group(lines, {
+    selectable: false,
+    evented: false,
+  })
+  
+  fabricCanvas.add(grid)
+  fabricCanvas.sendToBack(grid)
+}
+
 // Store를 사용한 내부 벽 추가
 const addInteriorWall = (start: { x: number, y: number }, end: { x: number, y: number }) => {
   if (!fabricCanvas) return
@@ -583,7 +787,7 @@ const addInteriorWall = (start: { x: number, y: number }, end: { x: number, y: n
   const isSelectMode = currentTool.value === 'select'
 
   const wall = new fabric.Line([start.x, start.y, end.x, end.y], {
-    stroke: isSelectMode ? '#666666' : '#999999', // Select 모드: 진한 회색, Draw 모드: 밝은 회색
+    stroke: isSelectMode ? '#444444' : '#666666', // Select 모드: 더 진한 회색, Draw 모드: 진한 회색
     strokeWidth: 3,
     strokeLineCap: 'round',
     selectable: isSelectMode,
@@ -647,7 +851,7 @@ const createRoom = () => {
 
   // 위쪽 벽 (좌 → 우)
   const topWall = new fabric.Line([startX, startY, startX + roomWidthPx, startY], {
-    stroke: '#999999', // 더 밝은 회색
+    stroke: '#666666', // 더 진한 회색
     strokeWidth: wallThickness,
     selectable: true,
     evented: true,
@@ -664,7 +868,7 @@ const createRoom = () => {
 
   // 아래쪽 벽 (좌 → 우)
   const bottomWall = new fabric.Line([startX, startY + roomHeightPx, startX + roomWidthPx, startY + roomHeightPx], {
-    stroke: '#999999', // 더 밝은 회색
+    stroke: '#666666', // 더 진한 회색
     strokeWidth: wallThickness,
     selectable: true,
     evented: true,
@@ -681,7 +885,7 @@ const createRoom = () => {
 
   // 왼쪽 벽 (위 → 아래)
   const leftWall = new fabric.Line([startX, startY, startX, startY + roomHeightPx], {
-    stroke: '#999999', // 더 밝은 회색
+    stroke: '#666666', // 더 진한 회색
     strokeWidth: wallThickness,
     selectable: true,
     evented: true,
@@ -698,7 +902,7 @@ const createRoom = () => {
 
   // 오른쪽 벽 (위 → 아래)
   const rightWall = new fabric.Line([startX + roomWidthPx, startY, startX + roomWidthPx, startY + roomHeightPx], {
-    stroke: '#999999', // 더 밝은 회색
+    stroke: '#666666', // 더 진한 회색
     strokeWidth: wallThickness,
     selectable: true,
     evented: true,
@@ -837,18 +1041,18 @@ const updateWallSelectability = () => {
       if (isSelectMode) {
         obj.opacity = 1.0
         if (obj.userData?.type === 'interior-wall') {
-          obj.stroke = '#666666' // 내부벽: 정상 색상
+          obj.stroke = '#444444' // 내부벽: 더 진한 색상
         } else {
-          obj.stroke = '#999999' // 외부벽: 정상 색상 (Line이므로 stroke 사용)
+          obj.stroke = '#666666' // 외부벽: 진한 색상 (Line이므로 stroke 사용)
         }
         obj.hoverCursor = 'move'
         obj.moveCursor = 'move'
       } else {
         obj.opacity = 0.7
         if (obj.userData?.type === 'interior-wall') {
-          obj.stroke = '#999999' // 내부벽: 더 밝은 회색
+          obj.stroke = '#666666' // 내부벽: 진한 회색
         } else {
-          obj.stroke = '#cccccc' // 외부벽: 더 밝은 회색 (Line이므로 stroke 사용)
+          obj.stroke = '#999999' // 외부벽: 진한 회색 (Line이므로 stroke 사용)
         }
         obj.hoverCursor = 'default'
         obj.moveCursor = 'default'
@@ -1336,6 +1540,12 @@ const clearCanvas = () => {
   if (!fabricCanvas) return
   
   fabricCanvas.clear()
+  
+  // 확대/축소 및 이동 상태 리셋
+  zoom.value = 1
+  pan.value = { x: 0, y: 0 }
+  isPanning.value = false
+  
   addGrid()
   selectedObject.value = null
   
@@ -1495,6 +1705,17 @@ const deleteSelectedObject = () => {
   
 }
 
+// 뷰 리셋 (확대/축소 및 이동 초기화)
+const resetView = () => {
+  if (!fabricCanvas) return
+  
+  zoom.value = 1
+  pan.value = { x: 0, y: 0 }
+  isPanning.value = false
+  
+  updateCanvasTransform()
+}
+
 // 윈도우 리사이즈 핸들링
 const handleResize = () => {
   if (!fabricCanvas || !canvasWrapper.value) return
@@ -1508,8 +1729,8 @@ const handleResize = () => {
   // Store에 캔버스 크기 업데이트
   floorplanStore.setCanvasSize({ width, height })
   
-  // 그리드 다시 그리기
-  clearCanvas()
+  // 확대/축소 상태 유지하면서 그리드 업데이트
+  updateCanvasTransform()
 }
 
 // Store 사용으로 데이터 요청 처리 함수들 제거
@@ -1520,6 +1741,15 @@ const handleResize = () => {
 // 툴 변경 감지 및 벽 선택 가능 여부 업데이트
 watch(currentTool, (newTool, oldTool) => {
   updateWallSelectability()
+  
+  // 커서 스타일 업데이트
+  if (canvasWrapper.value) {
+    if (newTool === 'wall') {
+      canvasWrapper.value.classList.add('drawing-mode')
+    } else {
+      canvasWrapper.value.classList.remove('drawing-mode')
+    }
+  }
 })
 
 // Store의 배치된 오브젝트 색상 변경 감지
@@ -1725,6 +1955,20 @@ onUnmounted(() => {
 
 .canvas-wrapper canvas {
   display: block;
+  cursor: crosshair;
+}
+
+/* 확대/축소 및 이동 관련 스타일 */
+.canvas-wrapper {
+  cursor: grab;
+}
+
+.canvas-wrapper:active {
+  cursor: grabbing;
+}
+
+/* 벽 그리기 모드일 때 커서 변경 */
+.canvas-wrapper.drawing-mode {
   cursor: crosshair;
 }
 
