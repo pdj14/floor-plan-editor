@@ -15,6 +15,9 @@
         <button @click="toggleCulling" class="btn btn-secondary" title="Toggle Frustum Culling">
           {{ cullingEnabled ? '👁️' : '🙈' }} Culling
         </button>
+        <button @click="toggleLOD" class="btn btn-secondary" title="Toggle LOD">
+          {{ lodEnabled ? '🎯' : '🎲' }} LOD
+        </button>
       </div>
       
       <div class="control-group">
@@ -59,6 +62,9 @@
         <span>Visible: {{ visibleObjects }}</span>
         <span>Polygons: {{ polygonCount }}</span>
         <span>FPS: {{ fps }}</span>
+        <span v-if="lodEnabled" class="lod-status">
+          LOD: {{ shouldUseLOD() ? 'ON' : 'OFF' }} ({{ visibleObjects }}/{{ lodThreshold }})
+        </span>
       </div>
     </div>
   </div>
@@ -92,6 +98,8 @@ const polygonCount = ref(0)
 const fps = ref(0)
 const visibleObjects = ref(0)
 const cullingEnabled = ref(true)
+const lodEnabled = ref(true)
+const lodThreshold = ref(10) // LOD 활성화 임계값 (보이는 객체 수)
 
 // Pinia Store 사용
 const floorplanStore = useFloorplanStore()
@@ -125,12 +133,163 @@ const updateObjectVisibility = () => {
   scene.traverse((child) => {
     if (child instanceof THREE.Mesh || child instanceof THREE.Group) {
       const isVisible = isObjectVisible(child)
-      child.visible = isVisible
-      if (isVisible) visibleCount++
+      
+      // LOD 객체가 아닌 경우에만 직접 가시성 설정
+      if (child.userData.type !== 'placed-object-lod') {
+        child.visible = isVisible
+        child.userData.wasVisible = isVisible // LOD를 위한 가시성 상태 저장
+        
+        // LOD 객체가 연결된 경우, LOD 객체의 가시성도 업데이트
+        if (child.userData.lodObject) {
+          child.userData.lodObject.userData.wasVisible = isVisible
+        }
+      }
+      
+      // LOD 객체는 카운트하지 않음 (중복 방지)
+      if (isVisible && child.userData.type !== 'placed-object-lod') {
+        visibleCount++
+      }
     }
   })
   
+  // visible 개수가 변경되었을 때만 LOD 업데이트 스케줄링
+  if (visibleCount !== lastVisibleCount) {
+    lastVisibleCount = visibleCount
+    scheduleLODUpdate()
+  }
+  
   visibleObjects.value = visibleCount
+}
+
+// LOD 시스템 관련 함수들
+const shouldUseLOD = (): boolean => {
+  const shouldUse = lodEnabled.value && visibleObjects.value > lodThreshold.value
+  // 전환이 있을 때만 로그 출력 (디버깅용)
+  if (shouldUse !== lastLODState) {
+  
+    lastLODState = shouldUse
+  }
+  return shouldUse
+}
+
+// LOD 색상 매핑 함수 (파스텔 톤)
+const getLODColor = (category: string): number => {
+  const colorMap: { [key: string]: number } = {
+    'av': 0xB8D4E3,      // 파스텔 파란색 (AV 기기)
+    'robot': 0xC8E6C9,   // 파스텔 초록색 (로봇)
+    'appliance': 0xFFE0B2, // 파스텔 주황색 (가전제품)
+    'furniture': 0xD7CCC8, // 파스텔 베이지색 (가구)
+    'etc': 0xE1BEE7,     // 파스텔 보라색 (기타)
+    'default': 0xF5F5F5  // 파스텔 회색 (기본)
+  }
+  
+  return colorMap[category] || colorMap.default
+}
+
+// LOD 상태 추적용 변수
+let lastLODState = false
+let lodUpdateTimeout: number | null = null
+let lastVisibleCount = 0
+
+const updateLOD = () => {
+  
+  if (!scene) return
+  
+  // placed-object가 있는지 먼저 확인
+  const placedObjects = scene.children.filter(child => 
+    child.userData?.type === 'placed-object'
+  )
+
+
+  
+  // placed-object가 없으면 LOD 체크하지 않음
+  if (placedObjects.length === 0) {
+
+    return
+  }
+  
+  const useLOD = shouldUseLOD()
+  let lodSwitchCount = 0
+  let totalObjects = 0
+  let objectsWithLOD = 0
+  
+
+  
+  // placed-object만 처리 (전체 scene traverse 대신)
+  placedObjects.forEach((child) => {
+    if (child.userData && child.userData.type === 'placed-object') {
+      totalObjects++
+      const originalObject = child
+      const lodObject = child.userData.lodObject
+      
+      
+      
+      if (originalObject && lodObject) {
+        objectsWithLOD++
+        const wasOriginalVisible = originalObject.userData.wasVisible !== false
+        
+        
+        
+        // LOD 조건에 따라 객체 전환
+        if (useLOD && wasOriginalVisible) {
+
+          // LOD 모드로 전환
+          originalObject.visible = false
+          lodObject.visible = true
+          lodSwitchCount++
+          
+        } else if (!useLOD && wasOriginalVisible) {
+          // 원본 모드로 전환
+          originalObject.visible = true
+          lodObject.visible = false
+          
+          
+          // LOD 모델의 머티리얼을 원본 색상으로 복원
+          lodObject.traverse((child: any) => {
+            if (child.isMesh && child.material && child.userData.originalMaterial) {
+              const original = child.userData.originalMaterial
+              if (original.color) {
+                child.material.color.copy(original.color)
+                child.material.needsUpdate = true
+                
+              }
+            }
+          })
+          
+          lodSwitchCount++
+          
+        } else {
+          // 가시성이 false인 경우 둘 다 숨김
+          originalObject.visible = false
+          lodObject.visible = false
+          
+        }
+      } else {
+        
+      }
+    }
+  })
+  
+  
+  
+  // 전환이 있을 때만 로그 출력
+  if (lodSwitchCount > 0) {
+
+  }
+}
+
+// 지연된 LOD 업데이트 함수
+const scheduleLODUpdate = () => {
+  // 기존 타임아웃이 있으면 취소
+  if (lodUpdateTimeout !== null) {
+    clearTimeout(lodUpdateTimeout)
+  }
+  
+  // 500ms 후에 LOD 업데이트 실행
+  lodUpdateTimeout = setTimeout(() => {
+    updateLOD()
+    lodUpdateTimeout = null
+  }, 500)
 }
 
 // Three.js 초기화
@@ -141,10 +300,7 @@ const initThreeJS = () => {
   const width = container.clientWidth
   const height = container.clientHeight
   
-  console.log('📐 컨테이너 크기:', width, 'x', height)
-  
   if (width === 0 || height === 0) {
-    console.warn('⚠️ 컨테이너 크기가 0입니다. CSS 스타일을 확인해주세요.')
     return
   }
 
@@ -152,15 +308,12 @@ const initThreeJS = () => {
   scene = new THREE.Scene()
   scene.background = new THREE.Color(0xf0f0f0)
 
-  // 카메라 생성 (확장된 범위에 맞게 조정)
+  // 카메라 생성
   camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 2000)
-  
-  // 초기 카메라 위치: 더 넓은 시야를 위한 높은 위치
-  camera.position.set(0, 25, 0)  // 더 높은 위치에서 내려다보기 (15 → 25)
+  camera.position.set(0, 25, 0)
   camera.lookAt(0, 0, 0)
-  // camera.up 설정을 기본값(0, 1, 0)으로 유지
 
-  // 렌더러 생성 (GLB 색상 정확한 표현을 위한 최적화)
+  // 렌더러 생성
   renderer = new THREE.WebGLRenderer({ 
     canvas: canvas3d.value,
     antialias: true,
@@ -169,75 +322,37 @@ const initThreeJS = () => {
     powerPreference: "high-performance"
   })
   renderer.setSize(width, height)
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)) // 성능 최적화
-  renderer.outputColorSpace = THREE.SRGBColorSpace // GLB 색상 정확한 표현
-  renderer.toneMapping = THREE.NoToneMapping // 톤매핑 비활성화로 원본 색상 보존
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+  renderer.outputColorSpace = THREE.SRGBColorSpace
+  renderer.toneMapping = THREE.NoToneMapping
   renderer.toneMappingExposure = 1.0
-  
-  // 그림자 효과 제거됨 - 사용자 요청에 따라
   renderer.shadowMap.enabled = false
-  // renderer.shadowMap.type = THREE.PCFSoftShadowMap -> 제거됨
-  
-  console.log('🎨 GLB 색상 정확한 표현을 위한 렌더러 설정 완료')
 
-  // 🎮 카메라 컨트롤 설정 (마우스 조작 최적화)
+  // 카메라 컨트롤 설정
   controls = new OrbitControls(camera, renderer.domElement)
-  
-  // 기본 설정
   controls.enableDamping = true
   controls.dampingFactor = 0.25
-  
-  // 카메라 각도 제한
-  controls.maxPolarAngle = Math.PI / 2.5// 30도 위쪽에서만 보기 (지면 아래로 볼 수 없도록 제한)
-  controls.minPolarAngle = 0 // 위쪽 제한
-  controls.target.set(0, 0, 0)  // 초기 타겟
-  
-  // 🖱️ 마우스 조작 설정
-  controls.screenSpacePanning = true  // 화면 공간 패닝 활성화 (더 직관적)
-  controls.enablePan = true  // 패닝 활성화
-  controls.enableZoom = true  // 줌 활성화
-  controls.enableRotate = true  // 회전 활성화
-  
-  // 마우스 버튼 매핑 설정 (요청사항에 맞게)
+  controls.maxPolarAngle = Math.PI / 2.5
+  controls.minPolarAngle = 0
+  controls.target.set(0, 0, 0)
+  controls.screenSpacePanning = true
+  controls.enablePan = true
+  controls.enableZoom = true
+  controls.enableRotate = true
   controls.mouseButtons = {
-    LEFT: THREE.MOUSE.ROTATE,    // 좌클릭: 회전
-    MIDDLE: THREE.MOUSE.DOLLY,   // 중간버튼: 줌
-    RIGHT: THREE.MOUSE.PAN       // 우클릭: 이동
+    LEFT: THREE.MOUSE.ROTATE,
+    MIDDLE: THREE.MOUSE.DOLLY,
+    RIGHT: THREE.MOUSE.PAN
   }
-  
-  // 컨트롤 속도 최적화 (확장된 범위에 맞게 조정)
   controls.rotateSpeed = 1.0
-  controls.zoomSpeed = 2.0  // 줌 속도 증가 (1.5 → 2.0)
-  controls.panSpeed = 1.5   // 패닝 속도 증가 (1.2 → 1.5)
-  
-  // 카메라 이동 범위 설정 (조정된 범위)
-  controls.maxDistance = 150 // 최대 줌 아웃 거리 (500 → 300으로 조정)
-  controls.minDistance = 0.05 // 최소 줌 인 거리 (0.1 → 0.05로 더 가까이 접근 가능)
-  
-  // 컨트롤 초기화 완료
+  controls.zoomSpeed = 2.0
+  controls.panSpeed = 1.5
+  controls.maxDistance = 150
+  controls.minDistance = 0.05
   controls.update()
-  
-  console.log('🎮 3D 카메라 컨트롤 활성화 완료:')
-  console.log('   🖱️ 좌클릭 + 드래그: 카메라 회전')
-  console.log('   🖱️ 우클릭 + 드래그: 카메라 이동')
-  console.log('   🔍 마우스 휠: 줌 인/아웃')
-  console.log('   📍 현재 카메라 위치:', camera.position.toArray())
-  
-  // 🧪 컨트롤 작동 테스트를 위한 이벤트 리스너
-  renderer.domElement.addEventListener('mousedown', (event) => {
-    console.log('🖱️ 마우스 다운:', event.button, '버튼')
-  })
-  
-  renderer.domElement.addEventListener('wheel', (event) => {
-    console.log('🔍 마우스 휠:', event.deltaY > 0 ? '줌 아웃' : '줌 인')
-  })
-  
 
   // 조명 설정
   setupLights()
-
-  // 초기 상태는 빈 상태 - Make3D 버튼으로만 객체 생성
-  // addDefaultFloor() 제거
 
   // Frustum 초기화
   updateFrustum()
@@ -246,54 +361,25 @@ const initThreeJS = () => {
   animate()
 }
 
-  // 조명 설정 (하얀색이 완전히 밝게 보이도록 극한 조명)
-  const setupLights = () => {
-    // 환경광 (하얀색이 완전히 밝게 보이도록 극한 환경광)
-    const ambientLight = new THREE.AmbientLight(0xffffff, 2.0) // 하얀색 완전 밝은 표현을 위한 극한 환경광
-    scene.add(ambientLight)
-    console.log('환경광 설정: 2.0 강도 (하얀색 완전 밝은 표현)')
+// 조명 설정
+const setupLights = () => {
+  const ambientLight = new THREE.AmbientLight(0xffffff, 2.0)
+  scene.add(ambientLight)
 
-    // 주 방향광 (하얀색이 완전히 밝게 보이도록 극한 방향광)
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5) // 하얀색을 완전히 밝게 보이게 하는 극한 방향광
-    directionalLight.position.set(5, 8, 3)
-    directionalLight.castShadow = false
-    scene.add(directionalLight)
-    console.log('주 방향광 설정: 1.5 강도 (하얀색 완전 밝은 표현)')
+  const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5)
+  directionalLight.position.set(5, 8, 3)
+  directionalLight.castShadow = false
+  scene.add(directionalLight)
 
-    // 보조 방향광 (하얀색 균등 극한 조명)
-    const fillLight = new THREE.DirectionalLight(0xffffff, 1.0) // 하얀색 균등 극한 조명
-    fillLight.position.set(-5, 5, -3)
-    fillLight.castShadow = false
-    scene.add(fillLight)
-    console.log('보조 방향광 설정: 1.0 강도 (하얀색 균등 극한 조명)')
-    
-    console.log('✅ 하얀색 완전 밝은 표현을 위한 극한 조명 설정 완료 (총 조명 강도: 4.5)')
-    console.log('🎨 하얀색이 완전히 밝게 보입니다')
-    console.log('💡 극한 조명 강도로 색상 완전 표현')
-  }
-
-// 실시간 3D 업데이트 제거로 인해 addDefaultFloor 함수 비활성화
-// Make3D 버튼으로만 바닥 생성
-// const addDefaultFloor = () => {
-//   const floorGeometry = new THREE.PlaneGeometry(20, 20)
-//   const floorMaterial = new THREE.MeshLambertMaterial({ 
-//     color: 0xe6f3ff, // 2D와 동일한 색상 (#e6f3ff)
-//     transparent: true,
-//     opacity: 0.8
-//   })
-//   
-//   const floor = new THREE.Mesh(floorGeometry, floorMaterial)
-//   floor.rotation.x = -Math.PI / 2
-//   floor.receiveShadow = false // 바닥 그림자 제거
-//   floor.userData.type = 'default-floor'
-//   scene.add(floor)
-// }
-
-
+  const fillLight = new THREE.DirectionalLight(0xffffff, 1.0)
+  fillLight.position.set(-5, 5, -3)
+  fillLight.castShadow = false
+  scene.add(fillLight)
+}
 
 // 2D 평면도에서 3D 벽 생성
 const create3DWalls = (wallsData: any) => {
-  const existingWalls = []
+  const existingWalls: any[] = []
   scene.traverse((child) => {
     if (child.userData.type === 'exterior-wall' || child.userData.type === 'interior-wall') {
       existingWalls.push(child)
@@ -315,14 +401,14 @@ const create3DWalls = (wallsData: any) => {
   const canvasHeight = wallsData.canvasSize?.height || 600
 
   if (wallsData.exteriorWalls) {
-    wallsData.exteriorWalls.forEach((wall: any, index: number) => {
-      createWall(wall, 'exterior-wall', 0xd3d3d3, canvasWidth, canvasHeight, false)
+    wallsData.exteriorWalls.forEach((wall: any) => {
+      createWall(wall, 'exterior-wall', 0xd3d3d3, canvasWidth, canvasHeight)
     })
   }
 
   if (wallsData.interiorWalls) {
-    wallsData.interiorWalls.forEach((wall: any, index: number) => {
-      createWall(wall, 'interior-wall', 0xd3d3d3, canvasWidth, canvasHeight, false)
+    wallsData.interiorWalls.forEach((wall: any) => {
+      createWall(wall, 'interior-wall', 0xd3d3d3, canvasWidth, canvasHeight)
     })
   }
 }
@@ -354,7 +440,6 @@ const createWall = (wall: any, wallType: string, color: number, canvasWidth: num
   const pos3D_Z = (centerY - canvasHeight / 2) / 40
   
   wallMesh.position.set(pos3D_X, pos3D_Y, pos3D_Z)
-  
   wallMesh.rotation.y = angle
   wallMesh.castShadow = false
   wallMesh.receiveShadow = false
@@ -367,38 +452,7 @@ const createWall = (wall: any, wallType: string, color: number, canvasWidth: num
   scene.add(wallMesh)
 }
 
-// GLB 모델 로드 (좌표계 수정에 맞게 업데이트)
-const loadGLBModel = async (url: string, position: { x: number, y: number, z?: number }, canvasWidth = 800, canvasHeight = 600) => {
-  loading.value = true
-  
-  try {
-    const loader = new GLTFLoader()
-    const gltf = await loader.loadAsync(url)
-    
-    const model = gltf.scene
-    
-    const pos3D_X = (position.x - canvasWidth / 2) / 40
-    const pos3D_Y = position.z || 0
-    const pos3D_Z = (position.y - canvasHeight / 2) / 40
-    
-    model.position.set(pos3D_X, pos3D_Y, pos3D_Z)
-    
-    model.traverse((child) => {
-      if (child instanceof THREE.Mesh) {
-        child.castShadow = false
-        child.receiveShadow = false
-      }
-    })
-    
-    scene.add(model)
-    objects.value.push(model)
-    
-  } catch (error) {
-    console.error('❌ GLB 모델 로딩 실패:', error)
-  } finally {
-    loading.value = false
-  }
-}
+
 
 // 애니메이션 루프
 let lastTime = 0
@@ -416,6 +470,8 @@ const animate = (currentTime = 0) => {
   // Frustum Culling 업데이트
   updateFrustum()
   updateObjectVisibility()
+  
+  // LOD 업데이트는 updateObjectVisibility에서 스케줄링됨
   
   // 폴리곤 수 계산
   updatePolygonCount()
@@ -443,16 +499,15 @@ const updatePolygonCount = () => {
 const resetCamera = () => {
   camera.position.set(0, 15, 0)
   camera.lookAt(0, 0, 0)
-  // camera.up은 기본값 (0, 1, 0) 유지
   controls.target.set(0, 0, 0)
   controls.update()
 }
 
 const toggleWireframe = () => {
   wireframe.value = !wireframe.value
-  scene.traverse((object) => {ㅋ
+  scene.traverse((object) => {
     if (object instanceof THREE.Mesh && object.material instanceof THREE.Material) {
-      object.material.wireframe = wireframe.value
+      (object.material as any).wireframe = wireframe.value
     }
   })
 }
@@ -478,8 +533,17 @@ const toggleCulling = () => {
     })
     visibleObjects.value = objects.value.length
   }
+}
+
+const toggleLOD = () => {
+  lodEnabled.value = !lodEnabled.value
   
-  console.log(`Frustum Culling ${cullingEnabled.value ? '활성화' : '비활성화'}`)
+  // LOD 상태 변경 시 즉시 업데이트 (지연 없이)
+  if (lodUpdateTimeout !== null) {
+    clearTimeout(lodUpdateTimeout)
+    lodUpdateTimeout = null
+  }
+  updateLOD()
 }
 
 const updateWallHeight = () => {
@@ -500,165 +564,19 @@ const updateWallHeight = () => {
   })
 }
 
-// ✅ 색상 처리 함수들 완전 제거 - GLB 원본 색상 100% 보존
-// 더 이상 색상을 인위적으로 변경하지 않습니다.
-// GLB 파일의 디자이너가 의도한 원본 색상과 재질을 그대로 사용합니다.
-
-// GLB 모델의 원본 재질 정보만 로그 출력 (변경하지 않음)
-const logOnlyOriginalMaterials = (model: any) => {
-  let materialCount = 0
-  
-  model.traverse((child: any) => {
-    if (child.isMesh && child.material) {
-      materialCount++
-      console.log(`Mesh 발견: ${child.name || `Mesh${materialCount}`}`)
-      
-      if (Array.isArray(child.material)) {
-        // 배열인 경우 각 재질 정보 로그
-        child.material.forEach((mat: any, index: number) => {
-          console.log(`  재질 배열[${index}]: ${mat.type}`)
-          logOriginalMaterialColor(mat, index)
-          console.log(`    → 원본 재질 보존됨 (변경 없음)`)
-        })
-      } else {
-        // 단일 재질인 경우
-        console.log(`  단일 재질: ${child.material.type}`)
-        logOriginalMaterialColor(child.material, 0)
-        console.log(`    → 원본 재질 보존됨 (변경 없음)`)
-      }
-    }
-  })
-  
-  console.log(`총 ${materialCount}개 Mesh의 원본 재질을 그대로 사용`)
-}
-
-// 원본 재질 색상 로그
-const logOriginalMaterialColor = (material: any, index: number) => {
-  if (material.color) {
-    const r = Math.round(material.color.r * 255)
-    const g = Math.round(material.color.g * 255) 
-    const b = Math.round(material.color.b * 255)
-    console.log(`    → 원본 색상[${index}]: RGB(${r}, ${g}, ${b})`)
-  }
-  
-  // 재질 종류별 정보
-  if (material.isMeshStandardMaterial) {
-    console.log(`    → 표준 재질 (조명 효과 O, 텍스처 O, 깊이감 O)`)
-  } else if (material.isMeshPhysicalMaterial) {
-    console.log(`    → 물리 재질 (조명 효과 O, 고급 반사 O)`)
-  } else if (material.isMeshLambertMaterial) {
-    console.log(`    → 램버트 재질 (조명 효과 O, 기본)`)
-  }
-}
-
-// GLB에서 주요 색상 추출 함수
-const extractPrimaryColor = (model: any): string => {
-  const colors: { r: number, g: number, b: number, count: number }[] = []
-  
-  model.traverse((child: any) => {
-    if (child.isMesh && child.material) {
-      const materials = Array.isArray(child.material) ? child.material : [child.material]
-      
-      materials.forEach((mat: any) => {
-        if (mat.color) {
-          // 기존 색상이 있는지 확인 (유사한 색상 그룹화)
-          const existingColor = colors.find(c => 
-            Math.abs(c.r - mat.color.r) < 0.1 && 
-            Math.abs(c.g - mat.color.g) < 0.1 && 
-            Math.abs(c.b - mat.color.b) < 0.1
-          )
-          
-          if (existingColor) {
-            existingColor.count++
-          } else {
-            colors.push({
-              r: mat.color.r,
-              g: mat.color.g,
-              b: mat.color.b,
-              count: 1
-            })
-          }
-        }
-      })
-    }
-  })
-  
-  // 가장 많이 사용된 색상을 주요 색상으로 선택
-  if (colors.length === 0) {
-    return '#CCCCCC' // 기본 회색
-  }
-  
-  const primaryColor = colors.reduce((prev, current) => 
-    (prev.count > current.count) ? prev : current
-  )
-  
-  // RGB를 HEX로 변환
-  const r = Math.round(primaryColor.r * 255)
-  const g = Math.round(primaryColor.g * 255)
-  const b = Math.round(primaryColor.b * 255)
-  
-  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`
-}
-
-// GLB 재질 정보 로그 함수
-const logMaterialInfo = (material: any, name: string) => {
-  console.log(`  ${name}:`)
-  
-  // 기본 색상
-  if (material.color) {
-    console.log(`    - 기본 색상: RGB(${Math.round(material.color.r * 255)}, ${Math.round(material.color.g * 255)}, ${Math.round(material.color.b * 255)})`)
-  }
-  
-  // PBR 재질 속성들
-  if (material.isMeshStandardMaterial || material.isMeshPhysicalMaterial) {
-    if (material.emissive) {
-      console.log(`    - 발광 색상: RGB(${Math.round(material.emissive.r * 255)}, ${Math.round(material.emissive.g * 255)}, ${Math.round(material.emissive.b * 255)})`)
-    }
-    if (material.metalness !== undefined) {
-      console.log(`    - 금속성: ${material.metalness}`)
-    }
-    if (material.roughness !== undefined) {
-      console.log(`    - 거칠기: ${material.roughness}`)
-    }
-  }
-  
-  // 텍스처 정보
-  if (material.map) {
-    console.log(`    - 기본 텍스처: 있음`)
-  }
-  if (material.normalMap) {
-    console.log(`    - 노멀 맵: 있음`)
-  }
-  if (material.roughnessMap) {
-    console.log(`    - 거칠기 맵: 있음`)
-  }
-  if (material.metalnessMap) {
-    console.log(`    - 금속성 맵: 있음`)
-  }
-  
-  // 투명도
-  if (material.transparent && material.opacity !== undefined) {
-    console.log(`    - 투명도: ${material.opacity}`)
-  }
-}
-
 // 실시간 3D 오브젝트 업데이트 (Store 변경 감지용)
 const updatePlacedObjectsIn3D = async (placedObjects: any[]) => {
-  console.log('🔄 updatePlacedObjectsIn3D 실행 시작')
-  console.log('🔄 전달받은 placedObjects:', placedObjects)
+
   
   if (!scene) {
-    console.log('❌ Scene 없음')
+    
     return
   }
 
   // 기존 배치 오브젝트 모두 제거
   const existingObjects = scene.children.filter(child => child.userData.type === 'placed-object')
-  console.log(`🗑️ 3D Scene에서 제거할 기존 오브젝트 개수: ${existingObjects.length}`)
   
-  existingObjects.forEach((obj, index) => {
-    console.log(`🗑️ 제거 중 ${index + 1}/${existingObjects.length}: ${obj.userData.placedObjectId || obj.userData.id || 'unknown'}`)
-    console.log(`🗑️ userData 전체:`, obj.userData)
+  existingObjects.forEach((obj) => {
     scene.remove(obj)
     if (obj.traverse) {
       obj.traverse((child: any) => {
@@ -674,69 +592,35 @@ const updatePlacedObjectsIn3D = async (placedObjects: any[]) => {
     }
   })
 
-  console.log(`✅ 기존 오브젝트 ${existingObjects.length}개 제거 완료`)
-  
-  // Scene 상태 확인
-  const remainingObjects = scene.children.filter(child => child.userData.type === 'placed-object')
-  console.log(`🔍 제거 후 Scene에 남은 placed-object 개수: ${remainingObjects.length}`)
-  
-  console.log(`🔍 Scene 전체 children 개수: ${scene.children.length}`)
-  console.log(`🔍 Scene children 타입들:`, scene.children.map(child => child.userData.type || child.type))
-
   // 새로운 오브젝트들 추가
   if (placedObjects.length > 0) {
-    console.log(`📦 ${placedObjects.length}개 오브젝트 3D 업데이트 중...`)
     await create3DObjects(placedObjects)
-  } else {
-    console.log('📦 모든 3D 오브젝트 제거됨 - 새로 추가할 오브젝트 없음')
   }
 
-  // 강제 렌더링 업데이트 (여러 방법 시도)
+  // 강제 렌더링 업데이트
   if (renderer && camera) {
-    console.log(`🔍 카메라 위치: (${camera.position.x}, ${camera.position.y}, ${camera.position.z})`)
-    console.log(`🔍 카메라 타겟:`, controls?.target || 'No controls')
-    console.log(`🔍 Scene에 있는 placed-object 수: ${scene.children.filter(child => child.userData?.type === 'placed-object').length}`)
-    
-    // Scene 강제 업데이트
     scene.updateMatrixWorld(true)
-    
-    // 여러 번 렌더링 시도
     renderer.render(scene, camera)
-    console.log('✅ 3D 첫 번째 렌더링 완료')
     
     requestAnimationFrame(() => {
       renderer.render(scene, camera)
-      console.log('✅ 3D 두 번째 렌더링 완료 (requestAnimationFrame)')
-      
-      // 최종 상태 확인
-      const finalObjectCount = scene.children.filter(child => child.userData?.type === 'placed-object').length
-      console.log(`🔍 최종 렌더링 후 placed-object 수: ${finalObjectCount}`)
     })
-    
-    console.log('✅ 3D 렌더링 업데이트 완료 (즉시)')
-  } else {
-    console.log('❌ renderer 또는 camera 없음')
   }
-  
-  console.log('🔄 updatePlacedObjectsIn3D 실행 완료')
 }
 
 // 3D 오브젝트 생성 (GLB 모델 로딩)
 const create3DObjects = async (placedObjects: any[]) => {
-  console.log('🎯 create3DObjects 호출됨')
-  console.log('🎯 Scene 존재:', !!scene)
-  console.log('🎯 placedObjects:', placedObjects)
-  console.log('🎯 placedObjects 길이:', placedObjects?.length)
+
   
   if (!scene || !placedObjects || placedObjects.length === 0) {
-    console.log('❌ create3DObjects 중단: scene 없음 또는 오브젝트 없음')
+    
     return
   }
-  
-  console.log('✅ create3DObjects 실행 시작')
 
-  // 기존 배치 오브젝트 제거
-  const existingObjects = scene.children.filter(child => child.userData.type === 'placed-object')
+  // 기존 배치 오브젝트 제거 (원본과 LOD 모두)
+  const existingObjects = scene.children.filter(child => 
+    child.userData.type === 'placed-object' || child.userData.type === 'placed-object-lod'
+  )
   existingObjects.forEach(obj => {
     scene.remove(obj)
     if (obj.traverse) {
@@ -757,84 +641,70 @@ const create3DObjects = async (placedObjects: any[]) => {
   const loader = new GLTFLoader()
   
   for (const placedObj of placedObjects) {
-    let extractedColor = '#CCCCCC' // 기본 색상
-    
     // 상자인 경우 특별한 3D 상자 모델 생성
     if (placedObj.category === 'etc' && placedObj.isBox) {
-      console.log(`📦 상자 3D 모델 생성: ${placedObj.name}`)
       create3DBox(placedObj, placedObj.color || '#D2B48C')
       continue
     }
     
     try {
-      console.log(`=== ${placedObj.name} GLB 로딩 시작: ${placedObj.glbUrl} ===`)
-      
+    console.log('loader.load', placedObj)
+      // 메인 모델 로드
       const gltf = await new Promise<any>((resolve, reject) => {
         loader.load(
           placedObj.glbUrl,
-          (gltf) => {
-            console.log(`${placedObj.name} GLB 로딩 성공!`)
-            resolve(gltf)
-          },
-          (progress) => {
-            console.log(`${placedObj.name} 로딩 진행률: ${(progress.loaded / progress.total * 100).toFixed(1)}%`)
-          },
-          (error) => {
-            console.error(`${placedObj.name} GLB 로딩 실패:`, error)
-            reject(error)
-          }
+          (gltf) => resolve(gltf),
+          undefined,
+          (error) => reject(error)
         )
       })
 
       const model = gltf.scene.clone()
-      console.log(`🔍 ${placedObj.name} 모델 복제 완료. 자식 수: ${model.children.length}`)
-      console.log(`🔍 모델 바운딩박스:`, model)
       
-      // GLB에서 주요 색상 추출
-      extractedColor = extractPrimaryColor(model)
-      console.log(`🔍 ${placedObj.name} 추출된 주요 색상: ${extractedColor}`)
-      
-      // 모델이 실제로 로드되었는지 확인
-      let meshCount = 0
-      model.traverse((child) => {
-        if (child.isMesh) {
-          meshCount++
-          console.log(`🔍 Mesh ${meshCount}: ${child.name || 'Unnamed'}, geometry: ${child.geometry?.type}`)
-        }
-      })
-      console.log(`🔍 총 Mesh 개수: ${meshCount}`)
-      
-      // GLB 원본 색상 보존 (색상 변경 없음)
-      console.log(`=== ${placedObj.name} GLB 원본 색상 보존 ===`)
-      logOnlyOriginalMaterials(model) // 원본 재질 로그
-      
-      console.log(`🎨 GLB 원본 색상 100% 보존 - 색상 변경 없음`)
-      console.log(`✨ 디자이너가 의도한 원본 재질과 색상을 그대로 사용`)
-      
-      // GLB 원본 재질과 색상을 그대로 보존 (색상 변경 없음)
-      let materialCount = 0
-      
-      model.traverse((child: any) => {
-        if (child.isMesh && child.material) {
-          materialCount++
+      // LOD 모델이 있는 경우 로드
+      let lodModel: THREE.Object3D | null = null
+
+      if (placedObj.lodUrl) {
+        try {
           
-          if (Array.isArray(child.material)) {
-            child.material.forEach((mat: any, index: number) => {
-              console.log(`  재질[${index}] ${mat.type}: 원본 RGB(${mat.color?.r.toFixed(3) || 'N/A'}, ${mat.color?.g.toFixed(3) || 'N/A'}, ${mat.color?.b.toFixed(3) || 'N/A'})`)
-              console.log(`  → 원본 색상 보존됨 (변경 없음)`)
+          const lodGltf = await new Promise<any>((resolve, reject) => {
+            loader.load(
+              placedObj.lodUrl,
+              (gltf) => {
+                
+                resolve(gltf)
+              },
+              undefined,
+              (error) => {
+                console.error(`❌ ${placedObj.name} LOD GLB 로딩 실패:`, error)
+                console.error(`   - 시도한 URL: ${placedObj.lodUrl}`)
+                reject(error)
+              }
+            )
+          })
+          
+          lodModel = lodGltf.scene.clone()
+          
+          
+          // LOD 모델의 메시 정보 확인
+          let lodMeshCount = 0
+          if (lodModel) {
+            lodModel.traverse((child: any) => {
+              if (child.isMesh) {
+                lodMeshCount++
+  
+              }
             })
-          } else {
-            console.log(`  재질 ${child.material.type}: 원본 RGB(${child.material.color?.r.toFixed(3) || 'N/A'}, ${child.material.color?.g.toFixed(3) || 'N/A'}, ${child.material.color?.b.toFixed(3) || 'N/A'})`)
-            console.log(`  → 원본 색상 보존됨 (변경 없음)`)
+
           }
+        } catch (lodError) {
+          console.warn(`${placedObj.name} LOD 모델 로드 실패:`, lodError)
         }
-      })
+      } else {
+        
+      }
       
-      console.log(`✅ ${materialCount}개 재질의 원본 색상 보존 완료`)
-      
-      console.log(`=== ${placedObj.name} GLB 원본 색상 보존 완료 ===`)
-      
-      // 모델 크기 조정 (width, depth, height 기준) - 먼저 스케일 적용
+      // 모델 크기 조정 (width, depth, height 기준)
       const box = new THREE.Box3().setFromObject(model)
       const size = box.getSize(new THREE.Vector3())
       const scaleX = placedObj.width / size.x   // 가로 (X축)
@@ -843,106 +713,139 @@ const create3DObjects = async (placedObjects: any[]) => {
       
       model.scale.set(scaleX, scaleY, scaleZ)
       
-      // 스케일 적용 후 다시 바운딩박스 계산
-      const scaledBox = new THREE.Box3().setFromObject(model)
-      const scaledSize = scaledBox.getSize(new THREE.Vector3())
-      
-      console.log(`${placedObj.name} 원본 크기: ${size.x.toFixed(3)} x ${size.y.toFixed(3)} x ${size.z.toFixed(3)}`)
-      console.log(`${placedObj.name} 스케일: ${scaleX.toFixed(3)} x ${scaleY.toFixed(3)} x ${scaleZ.toFixed(3)}`)
-      console.log(`${placedObj.name} 스케일 후 크기: ${scaledSize.x.toFixed(3)} x ${scaledSize.y.toFixed(3)} x ${scaledSize.z.toFixed(3)}`)
-      
-      // 모델 위치 설정 (스케일 적용 후)
-      console.log(`${placedObj.name} Store 좌표: (${placedObj.position.x}, ${placedObj.position.y})`)
-      
-      // TV는 바닥에 붙어있어야 하므로 y=0으로 설정
+      // 모델 위치 설정
       const isTV = placedObj.category === 'av'
       const pos3D = {
-        x: placedObj.position.x,     // Store X → 3D X
-        y: isTV ? 0 : placedObj.height / 2,  // TV는 바닥에, 다른 오브젝트는 중심에
-        z: placedObj.position.y      // Store Y → 3D Z (벽과 동일)
+        x: placedObj.position.x,
+        y: isTV ? 0 : placedObj.height / 2,
+        z: placedObj.position.y
       }
-      
-      console.log(`${placedObj.name} 3D 최종 위치: (${pos3D.x}, ${pos3D.y}, ${pos3D.z})`)
-      console.log(`참고: 방 중앙은 (0, 0, 0)이어야 함`)
       
       model.position.set(pos3D.x, pos3D.y, pos3D.z)
       
-      // 모델 회전 설정 (Y축 수직 회전 - 서있는 상태 유지)
-      console.log(`🔄 ${placedObj.name} 회전 설정: ${placedObj.rotation} 라디안 (${(placedObj.rotation * 180 / Math.PI).toFixed(1)}도)`)
-      console.log(`🔄 Z축 회전(기울임) → Y축 회전(수직상태 좌우회전)으로 수정`)
-      
-      // Y축 회전 = 수직축 중심 좌우 회전 (오브젝트가 서있는 상태 유지)
+      // 모델 회전 설정 (Y축 수직 회전)
       const rotationValue = placedObj.rotation
-      const testNegative = true // 2D와 3D 방향 맞추기
+      model.rotation.y = -rotationValue
       
-      if (testNegative) {
-        console.log(`🔄 Y축 음수 회전: ${-rotationValue} 라디안 (서있는 상태 유지)`)
-        model.rotation.y = -rotationValue
-      } else {
-        console.log(`🔄 Y축 정방향 회전: ${rotationValue} 라디안 (서있는 상태 유지)`)
-        model.rotation.y = rotationValue
+      // LOD 모델이 있는 경우 동일한 스케일, 위치, 회전 적용
+      if (lodModel) {
+        lodModel.scale.set(scaleX, scaleY, scaleZ)
+        lodModel.position.set(pos3D.x, pos3D.y, pos3D.z) // 원본과 동일한 위치
+        lodModel.rotation.y = -rotationValue // 원본과 동일한 회전
+        
+        // LOD 모델은 초기에 숨김
+        lodModel.visible = false
+        
+        
+        
+        // LOD 모델에 메타데이터 설정
+        lodModel.userData = {
+          type: 'placed-object-lod',
+          placedObjectId: placedObj.id,
+          objectName: placedObj.name,
+          category: placedObj.category,
+          height: placedObj.height,
+          boxId: placedObj.boxId,
+          lodUrl: placedObj.lodUrl,  // LOD URL 정보 추가
+          glbUrl: placedObj.glbUrl   // 원본 URL 정보 추가
+        }
+        
+        // LOD 모델의 모든 머티리얼을 단일 색상으로 변경 (성능 최적화)
+        lodModel.traverse((child: any) => {
+          if (child.isMesh && child.material) {
+            // 기존 머티리얼의 색상 정보만 저장 (텍스처 맵은 저장하지 않음)
+            if (!child.userData.originalMaterial) {
+              child.userData.originalMaterial = {
+                color: child.material.color?.clone()
+              }
+            }
+            
+            // 완전히 새로운 단일 색상 머티리얼로 교체
+            const lodColor = getLODColor(placedObj.category)
+            const newMaterial = new THREE.MeshStandardMaterial({
+              color: lodColor,
+              roughness: 0.5,
+              metalness: 0.0
+            })
+            
+            // 기존 머티리얼 정리
+            if (child.material.dispose) {
+              child.material.dispose()
+            }
+            
+            // 새 머티리얼 적용
+            child.material = newMaterial
+            
+            
+          }
+        })
       }
       
-      console.log(`✅ ${placedObj.name} Y축 수직 회전 적용 완료 (기울임 없음)`)
-      
-      // 메타데이터 설정
-      model.userData = {
+      // 메타데이터 설정 (LOD 연결을 위해 userData를 나중에 설정)
+      const userData: any = {
         type: 'placed-object',
         placedObjectId: placedObj.id,
         objectName: placedObj.name,
         category: placedObj.category,
-        height: placedObj.height, // 높이 정보 추가
-        boxId: placedObj.boxId // 상자 ID 정보 추가
+        height: placedObj.height,
+        boxId: placedObj.boxId,
+        glbUrl: placedObj.glbUrl,   // 원본 URL 정보 추가
+        lodUrl: placedObj.lodUrl    // LOD URL 정보 추가
       }
-      
-      console.log(`🔍 Scene 추가 전 children 수: ${scene.children.length}`)
-      console.log(`🔍 모델 최종 위치: (${model.position.x}, ${model.position.y}, ${model.position.z})`)
-      console.log(`🔍 모델 최종 회전: (${model.rotation.x}, ${model.rotation.y}, ${model.rotation.z})`)
-      console.log(`🔍 모델 최종 스케일: (${model.scale.x}, ${model.scale.y}, ${model.scale.z})`)
       
       scene.add(model)
       
-      console.log(`🔍 Scene 추가 후 children 수: ${scene.children.length}`)
-      console.log(`🔍 Scene children 타입들:`, scene.children.map(child => child.userData?.type || child.type))
-      console.log(`=== ✅ ${placedObj.name} 3D 씬에 추가 완료! ===`)
+      // LOD 모델이 있는 경우 씬에 추가하고 연결
+      if (lodModel) {
+        scene.add(lodModel)
+        
+        // userData에 LOD 연결 정보 추가
+        userData.lodObject = lodModel
+        lodModel.userData.originalObject = model
+        
+        
+        
+        // 즉시 확인: 연결이 제대로 되었는지 테스트
+        
+        
+        // 1초 후 다시 확인 (비동기 문제 확인)
+        setTimeout(() => {
+
+        }, 1000)
+      } else {
+        
+      }
+      
+      // 최종적으로 model.userData 설정 (LOD 정보 포함)
+      model.userData = { ...userData } // 객체 복사로 변경
       
     } catch (error) {
       console.error(`❌ GLB 모델 로딩 실패 (${placedObj.name}):`, error)
       
-      // 상자인 경우 특별한 3D 상자 모델 생성
-      if (placedObj.category === 'etc' && placedObj.isOnBox) {
-        create3DBox(placedObj, extractedColor)
-      } else {
-        // 오류 시 기본 큐브로 대체
-        const fallbackGeometry = new THREE.BoxGeometry(placedObj.width, placedObj.height, placedObj.depth)
-        const fallbackMaterial = new THREE.MeshStandardMaterial({ 
-          color: extractedColor || '#ff0000' // 빨간색으로 오류 표시
-        })
-        const fallbackMesh = new THREE.Mesh(fallbackGeometry, fallbackMaterial)
-        fallbackMesh.position.set(placedObj.position.x, placedObj.height / 2, placedObj.position.y)
-        fallbackMesh.userData = {
-          type: 'placed-object',
-          placedObjectId: placedObj.id,
-          objectName: placedObj.name + ' (오류)',
-          category: placedObj.category,
-          height: placedObj.height, // 높이 정보 추가
-          boxId: placedObj.boxId // 상자 ID 정보 추가
-        }
-        scene.add(fallbackMesh)
-        console.log(`${placedObj.name} 오류로 인해 기본 큐브로 대체됨`)
+      // 오류 시 기본 큐브로 대체
+      const fallbackGeometry = new THREE.BoxGeometry(placedObj.width, placedObj.height, placedObj.depth)
+      const fallbackMaterial = new THREE.MeshStandardMaterial({ 
+        color: '#ff0000' // 빨간색으로 오류 표시
+      })
+      const fallbackMesh = new THREE.Mesh(fallbackGeometry, fallbackMaterial)
+      fallbackMesh.position.set(placedObj.position.x, placedObj.height / 2, placedObj.position.y)
+      fallbackMesh.userData = {
+        type: 'placed-object',
+        placedObjectId: placedObj.id,
+        objectName: placedObj.name + ' (오류)',
+        category: placedObj.category,
+        height: placedObj.height,
+        boxId: placedObj.boxId
       }
+      scene.add(fallbackMesh)
     }
   }
 }
 
 // 3D 상자 모델 생성
 const create3DBox = (placedObj: any, color: string) => {
-  console.log(`📦 3D 상자 생성: ${placedObj.name}`)
+  const pastelBrown = '#E6D5AC'
   
-  // 파스텔 연한 갈색 색상 설정
-  const pastelBrown = '#E6D5AC' // 파스텔 연한 갈색
-  
-  // 상자 본체 (바닥과 벽만, 뚜껑 없음)
   const boxGeometry = new THREE.BoxGeometry(placedObj.width, placedObj.height, placedObj.depth)
   const boxMaterial = new THREE.MeshStandardMaterial({ 
     color: pastelBrown,
@@ -951,17 +854,12 @@ const create3DBox = (placedObj: any, color: string) => {
   })
   const boxMesh = new THREE.Mesh(boxGeometry, boxMaterial)
   
-  // 상자 그룹 생성 (뚜껑 없이)
   const boxGroup = new THREE.Group()
   boxGroup.add(boxMesh)
   
-  // 위치 설정
   boxGroup.position.set(placedObj.position.x, placedObj.height / 2, placedObj.position.y)
-  
-  // 회전 적용
   boxGroup.rotation.y = placedObj.rotation || 0
   
-  // 메타데이터 설정
   boxGroup.userData = {
     type: 'placed-object',
     placedObjectId: placedObj.id,
@@ -969,49 +867,25 @@ const create3DBox = (placedObj: any, color: string) => {
     category: placedObj.category,
     isBox: true,
     boxId: placedObj.id,
-    height: placedObj.height // 높이 정보 추가
+    height: placedObj.height
   }
   
   scene.add(boxGroup)
-  console.log(`✅ 3D 상자 생성 완료: ${placedObj.name} (색상: ${pastelBrown}, 뚜껑 없음)`)
 }
 
 // 상자 위 오브젝트 배치 처리
 const handleObjectsOnBoxes = () => {
-  console.log('📦 상자 위 오브젝트 배치 처리 시작')
-  
-  // Store에서 상자와 모든 오브젝트 정보 가져오기
   const storeObjects = floorplanStore.placedObjects
-  const boxes = storeObjects.filter(obj => obj.category === 'etc' && obj.isBox) // 상자는 isBox가 true
-  const allObjects = storeObjects.filter(obj => !obj.isBox) // 상자가 아닌 모든 오브젝트
+  const boxes = storeObjects.filter(obj => obj.category === 'etc' && obj.isBox)
+  const allObjects = storeObjects.filter(obj => !obj.isBox)
   
-  console.log(`📦 Store에서 발견된 상자 개수: ${boxes.length}`)
-  console.log(`📦 Store에서 발견된 모든 오브젝트 개수: ${allObjects.length}`)
-  console.log('📦 Store의 모든 오브젝트:', storeObjects.map(obj => ({
-    name: obj.name,
-    category: obj.category,
-    isBox: obj.isBox,
-    isOnBox: obj.isOnBox,
-    boxId: obj.boxId
-  })))
-  
-  // 3D 씬에서 해당 오브젝트들을 찾아서 위치 조정
   boxes.forEach(boxData => {
-    console.log(`📦 상자 처리: ${boxData.name}, ID: ${boxData.id}`)
-    
-    // 3D 씬에서 상자 오브젝트 찾기
     const box3D = scene.children.find(child => 
       child.userData?.type === 'placed-object' && 
       child.userData?.placedObjectId === boxData.id
     )
     
     if (!box3D) {
-      console.log(`❌ 3D 씬에서 상자를 찾을 수 없음: ${boxData.name}`)
-      console.log('🔍 3D 씬의 모든 오브젝트:', scene.children.map(child => ({
-        type: child.userData?.type,
-        placedObjectId: child.userData?.placedObjectId,
-        objectName: child.userData?.objectName
-      })))
       return
     }
     
@@ -1020,17 +894,13 @@ const handleObjectsOnBoxes = () => {
     const boxWidth = boxData.width || 1.0
     const boxDepth = boxData.depth || 1.0
     
-    console.log(`📦 상자 3D 위치: (${boxPosition.x}, ${boxPosition.y}, ${boxPosition.z}), 크기: ${boxWidth}x${boxHeight}x${boxDepth}`)
-    
     // 상자와 겹치는 모든 오브젝트 찾기
     const overlappingObjects = allObjects.filter(objData => {
-      // 2D 평면에서 겹침 검사 (X, Z 좌표)
       const objX = objData.position.x
-      const objZ = objData.position.y // Store의 Y가 3D의 Z
+      const objZ = objData.position.y
       const objWidth = objData.width || 1.0
       const objDepth = objData.depth || 1.0
       
-      // 상자와 오브젝트의 경계 계산
       const boxLeft = boxData.position.x - boxWidth / 2
       const boxRight = boxData.position.x + boxWidth / 2
       const boxTop = boxData.position.y - boxDepth / 2
@@ -1041,102 +911,79 @@ const handleObjectsOnBoxes = () => {
       const objTop = objZ - objDepth / 2
       const objBottom = objZ + objDepth / 2
       
-      // 겹침 검사
       const overlapsX = !(objRight < boxLeft || objLeft > boxRight)
       const overlapsZ = !(objBottom < boxTop || objTop > boxBottom)
       
-      const isOverlapping = overlapsX && overlapsZ
-      
-      if (isOverlapping) {
-        console.log(`📦 ${objData.name}이 상자 ${boxData.name}와 겹침: (${objX}, ${objZ}) vs (${boxData.position.x}, ${boxData.position.y})`)
-      }
-      
-      return isOverlapping
+      return overlapsX && overlapsZ
     })
     
-    console.log(`📦 상자 ${boxData.name}와 겹치는 오브젝트 ${overlappingObjects.length}개 발견`)
-    
     overlappingObjects.forEach(objData => {
-      // 3D 씬에서 해당 오브젝트 찾기
       const obj3D = scene.children.find(child => 
         child.userData?.type === 'placed-object' && 
         child.userData?.placedObjectId === objData.id
       )
       
       if (!obj3D) {
-        console.log(`❌ 3D 씬에서 오브젝트를 찾을 수 없음: ${objData.name}`)
-        console.log('🔍 3D 씬의 모든 오브젝트:', scene.children.map(child => ({
-          type: child.userData?.type,
-          placedObjectId: child.userData?.placedObjectId,
-          objectName: child.userData?.objectName
-        })))
         return
       }
       
       const objHeight = objData.height || 1.0
-      
-      // TV는 바닥에 붙어있는 오브젝트이므로 상자 위에 배치할 때는 높이를 조정
       const isTV = objData.category === 'av'
       let newY
       
       if (isTV) {
-        // TV는 상자 위에 바로 놓기 (TV의 높이를 고려하지 않음)
         newY = boxPosition.y + boxHeight / 2
-        console.log(`📺 TV ${objData.name}을 상자 위에 바로 배치: Y=${newY} (상자높이:${boxHeight})`)
       } else {
-        // 다른 오브젝트는 기존 로직 유지
         newY = boxPosition.y + boxHeight / 2 + objHeight / 2
-        console.log(`📦 ${objData.name}을 상자 위로 이동: Y=${newY} (상자높이:${boxHeight}, 오브젝트높이:${objHeight})`)
       }
       
       obj3D.position.y = newY
       
-      // 상자의 회전도 오브젝트에 적용
       if (box3D.rotation) {
         obj3D.rotation.y = box3D.rotation.y
       }
-      
-      console.log(`📦 ${objData.name}을 상자 위로 이동: Y=${newY} (상자높이:${boxHeight}, 오브젝트높이:${objHeight})`)
     })
   })
-  
-  console.log('✅ 상자 위 오브젝트 배치 처리 완료')
 }
 
 // Store를 사용한 Make3D - 2D 객체들을 상세한 3D로 변환
 const make3D = async () => {
-  if (loading.value) return
+
+  
+  if (loading.value) {
+
+    return
+  }
   
   loading.value = true
+
   
   try {
     const data = floorplanStore.floorplanData
-    console.log('🏗️ Make3D 시작 - Store 데이터:', data)
-    console.log('📦 배치된 오브젝트 개수:', data.placedObjects?.length || 0)
-    console.log('📦 배치된 오브젝트 목록:', data.placedObjects)
+
 
     if (!data || !data.roomSize) {
-      console.log('❌ Make3D 중단: 방 데이터 없음')
+
       return
     }
 
     if ((!data.exteriorWalls || data.exteriorWalls.length === 0) && 
         (!data.interiorWalls || data.interiorWalls.length === 0)) {
-      console.log('❌ Make3D 중단: 벽 데이터 없음')
+
       return
     }
 
-    console.log('🧱 벽 생성 중...')
+
     create3DWalls(data)
     
-    console.log('📦 오브젝트 생성 시작...')
+
     await create3DObjects(data.placedObjects || [])
     
-    console.log('📦 상자 위 오브젝트 배치 처리...')
+
     handleObjectsOnBoxes()
     
-    console.log('✨ 추가 3D 기능 적용...')
-    addEnhanced3DFeatures()
+    // console.log('✨ addEnhanced3DFeatures 호출')
+    // addEnhanced3DFeatures()
     
   } catch (error) {
     console.error('❌ Make3D 중 오류 발생:', error)
@@ -1145,7 +992,7 @@ const make3D = async () => {
   }
 }
 
-// 향상된 3D 기능 추가 (저장된 데이터 사용)
+// 향상된 3D 기능 추가
 const addEnhanced3DFeatures = () => {
   if (!scene) {
     return
@@ -1172,14 +1019,10 @@ const addEnhanced3DFeatures = () => {
   const roomCenterX = (minX + maxX) / 2
   const roomCenterZ = (minZ + maxZ) / 2
   
-      // GLB 원본 색상 보존을 위해 추가 조명 제거
-    // addEnhancedLighting(roomCenterX, roomCenterZ, roomWidth, roomDepth)
+  addEnhancedLighting(roomCenterX, roomCenterZ, roomWidth, roomDepth)
 }
 
-// 천장 기능 제거됨 - 사용자 요청에 따라
-// const addCeiling = ... (제거됨)
-
-// 향상된 조명 추가 (SpotLight 제거됨)
+// 향상된 조명 추가
 const addEnhancedLighting = (centerX: number, centerZ: number, width: number, depth: number) => {
   const roomLight = new THREE.PointLight(0xffffff, 0.8, Math.max(width, depth) * 1.5)
   roomLight.position.set(centerX, 2, centerZ)
@@ -1187,9 +1030,6 @@ const addEnhancedLighting = (centerX: number, centerZ: number, width: number, de
   roomLight.userData.type = 'room-light'
   scene.add(roomLight)
 }
-
-// 그림자 기능 제거됨 - 사용자 요청에 따라  
-// const enhanceShadows = ... (제거됨)
 
 // Clear All 3D - 모든 3D 객체 제거
 const clearAll3D = () => {
@@ -1242,23 +1082,21 @@ const handleResize = () => {
   camera.updateProjectionMatrix()
   renderer.setSize(width, height)
   
-  // Store에 캔버스 크기 업데이트 (3D 뷰어 크기 변경 시)
+  // Store에 캔버스 크기 업데이트
   floorplanStore.setCanvasSize({ width, height })
 }
 
-// Store 변경 감지 - 배치된 오브젝트 실시간 동기화 (무한루프 방지)
-let isUpdating = false // 업데이트 중 플래그
+// Store 변경 감지 - 배치된 오브젝트 실시간 동기화
+let isUpdating = false
 watch(
   () => floorplanStore.placedObjects,
   async (newObjects, oldObjects) => {
     if (!scene || !renderer || !camera || isUpdating) return
     
-    // 실제 개수나 ID 변경만 감지 (위치, 회전 변경 시에만 실행)
     const oldLength = oldObjects?.length || 0
     const newLength = newObjects?.length || 0
     
     if (oldLength === newLength && oldObjects && newObjects) {
-      // 개수가 같으면 위치나 회전 변경인지 확인
       const hasPositionChange = newObjects.some((newObj, index) => {
         const oldObj = oldObjects[index]
         return oldObj && (
@@ -1269,26 +1107,14 @@ watch(
       })
       
       if (!hasPositionChange) {
-        console.log('🔄 색상 등 무시할 수 있는 변경 - 3D 업데이트 스킵')
         return
       }
     }
     
     isUpdating = true
-    console.log('🔄 Store placedObjects 변경 감지 - 3D 동기화 시작')
-    console.log(`📊 오브젝트 개수 변화: ${oldLength} → ${newLength}`)
-    
-    // 삭제된 오브젝트 추적
-    if (newLength < oldLength) {
-      console.log('🗑️ 오브젝트 삭제 감지!')
-      console.log('🗑️ 이전 오브젝트들:', oldObjects?.map(obj => obj.id))
-      console.log('🗑️ 현재 오브젝트들:', newObjects?.map(obj => obj.id))
-    }
     
     try {
-      // 실시간 3D 업데이트
       await updatePlacedObjectsIn3D(newObjects || [])
-      console.log('✅ 3D 오브젝트 동기화 완료')
     } finally {
       isUpdating = false
     }
@@ -1308,6 +1134,12 @@ onUnmounted(() => {
   }
   window.removeEventListener('resize', handleResize)
   
+  // LOD 업데이트 타임아웃 정리
+  if (lodUpdateTimeout !== null) {
+    clearTimeout(lodUpdateTimeout)
+    lodUpdateTimeout = null
+  }
+  
   // Three.js 리소스 정리
   if (renderer) {
     renderer.dispose()
@@ -1315,12 +1147,9 @@ onUnmounted(() => {
   controls?.dispose()
 })
 
-// (handleWallUpdate 함수는 제거됨 - App.vue에서 직접 create3DWalls 호출)
-
 // 외부에서 호출할 수 있는 함수들
 defineExpose({
   create3DWalls,
-  loadGLBModel,
   make3D,
   clearAll3D
 })
@@ -1440,5 +1269,10 @@ defineExpose({
   gap: 1rem;
   font-size: 0.85rem;
   color: #666;
+}
+
+.lod-status {
+  color: #e67e22;
+  font-weight: 600;
 }
 </style> 

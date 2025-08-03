@@ -298,6 +298,7 @@ interface GameObject {
   height?: number // 높이
   color?: string  // 색상 (상자용)
   isBox?: boolean // 상자 여부
+  lodUrl?: string // LOD용 GLB 파일 URL
 }
 
 interface NewObject {
@@ -379,6 +380,7 @@ const defaultObjects: GameObject[] = [
     name: '로봇케이지',
     category: 'robot',
     glbUrl: '/로봇케이지.glb',
+    lodUrl: '/로봇케이지_light.glb',
     thumbnail: '/로봇케이지.png',
     description: '로봇을 보호하는 케이지',
     size: '2.0m × 1.2m × 2.0m',
@@ -403,6 +405,7 @@ const defaultObjects: GameObject[] = [
     name: 'Rack1',
     category: 'equipment',
     glbUrl: '/Rack1.glb',
+    lodUrl: '/Rack1_light.glb',
     thumbnail: '/Rack1.png',
     description: 'Rack1 설비',
     size: '2.0m ×1.0m × 2.0m',
@@ -653,7 +656,7 @@ const uploadObject = async () => {
 // 오브젝트 편집
 const editObject = (object: GameObject) => {
   // 편집 모달 표시 로직
-  console.log('Edit object:', object)
+  
 }
 
 // 오브젝트 삭제

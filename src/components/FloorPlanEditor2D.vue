@@ -246,14 +246,6 @@ const initCanvas = () => {
       pan.value.y += deltaY
       lastPanPoint.value = { x: e.clientX, y: e.clientY }
       
-      console.log('패닝 중:', { 
-        deltaX, 
-        deltaY, 
-        pan: pan.value, 
-        clientX: e.clientX,
-        clientY: e.clientY
-      })
-      
       updateCanvasTransform()
     }
   })
@@ -376,12 +368,6 @@ const setupZoomAndPanEvents = () => {
       const rect = fabricCanvas.upperCanvasEl.getBoundingClientRect()
       lastPanPoint.value = { x: e.clientX, y: e.clientY }
       fabricCanvas.defaultCursor = 'grabbing'
-      
-      console.log('패닝 시작:', { 
-        clientX: e.clientX, 
-        clientY: e.clientY, 
-        isPanning: isPanning.value 
-      })
     }
   })
   
@@ -389,7 +375,7 @@ const setupZoomAndPanEvents = () => {
     if (e.button === 2) { // 오른쪽 클릭 해제
       isPanning.value = false
       fabricCanvas.defaultCursor = 'default'
-      console.log('패닝 종료:', { isPanning: isPanning.value })
+
     }
   })
   
@@ -1478,6 +1464,7 @@ const handlePlaceObject = (event: any) => {
     name: object.name,
     category: object.category,
     glbUrl: object.glbUrl,
+    lodUrl: object.lodUrl, // LOD 모델 URL 추가
     description: object.description,
     width: object.width || 1,    // 가로 (2D X축)
     depth: object.depth || 1,    // 세로 (2D Y축)
