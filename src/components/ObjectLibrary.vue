@@ -375,6 +375,18 @@ const defaultObjects: GameObject[] = [
     height: 1.5
   },
   {
+    id: 'default-robot-cage',
+    name: '로봇케이지',
+    category: 'robot',
+    glbUrl: '/로봇케이지.glb',
+    thumbnail: '/로봇케이지.png',
+    description: '로봇을 보호하는 케이지',
+    size: '2.0m × 1.2m × 2.0m',
+    width: 2.0,
+    depth: 1.2,
+    height: 2.0
+  },
+  {
     id: 'default-txi-equipment',
     name: 'TXI',
     category: 'equipment',

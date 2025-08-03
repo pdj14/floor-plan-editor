@@ -12,6 +12,9 @@
         <button @click="toggleLights" class="btn btn-secondary" title="Toggle Lights">
           {{ lightsOn ? '💡' : '🔅' }} Lights
         </button>
+        <button @click="toggleCulling" class="btn btn-secondary" title="Toggle Frustum Culling">
+          {{ cullingEnabled ? '👁️' : '🙈' }} Culling
+        </button>
       </div>
       
       <div class="control-group">
@@ -53,6 +56,7 @@
     <div class="info-panel">
       <div class="stats">
         <span>Objects: {{ objects.length }}</span>
+        <span>Visible: {{ visibleObjects }}</span>
         <span>Polygons: {{ polygonCount }}</span>
         <span>FPS: {{ fps }}</span>
       </div>
@@ -76,6 +80,8 @@ let camera: THREE.PerspectiveCamera
 let renderer: THREE.WebGLRenderer
 let controls: OrbitControls
 let animationId: number
+let frustum: THREE.Frustum
+let projScreenMatrix: THREE.Matrix4
 
 const loading = ref(false)
 const wireframe = ref(false)
@@ -84,9 +90,48 @@ const wallHeight = ref(2.5)
 const objects = ref<THREE.Object3D[]>([])
 const polygonCount = ref(0)
 const fps = ref(0)
+const visibleObjects = ref(0)
+const cullingEnabled = ref(true)
 
 // Pinia Store 사용
 const floorplanStore = useFloorplanStore()
+
+// Frustum Culling 관련 함수들
+const updateFrustum = () => {
+  if (!camera) return
+  
+  projScreenMatrix = new THREE.Matrix4()
+  projScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
+  frustum = new THREE.Frustum()
+  frustum.setFromProjectionMatrix(projScreenMatrix)
+}
+
+const isObjectVisible = (object: THREE.Object3D): boolean => {
+  if (!cullingEnabled.value || !frustum) return true
+  
+  // 객체의 바운딩 박스 계산
+  const box = new THREE.Box3()
+  box.setFromObject(object)
+  
+  // Frustum과 바운딩 박스 교차 테스트
+  return frustum.intersectsBox(box)
+}
+
+const updateObjectVisibility = () => {
+  if (!scene) return
+  
+  let visibleCount = 0
+  
+  scene.traverse((child) => {
+    if (child instanceof THREE.Mesh || child instanceof THREE.Group) {
+      const isVisible = isObjectVisible(child)
+      child.visible = isVisible
+      if (isVisible) visibleCount++
+    }
+  })
+  
+  visibleObjects.value = visibleCount
+}
 
 // Three.js 초기화
 const initThreeJS = () => {
@@ -194,6 +239,9 @@ const initThreeJS = () => {
   // 초기 상태는 빈 상태 - Make3D 버튼으로만 객체 생성
   // addDefaultFloor() 제거
 
+  // Frustum 초기화
+  updateFrustum()
+  
   // 렌더링 시작
   animate()
 }
@@ -365,6 +413,10 @@ const animate = (currentTime = 0) => {
   
   controls.update()
   
+  // Frustum Culling 업데이트
+  updateFrustum()
+  updateObjectVisibility()
+  
   // 폴리곤 수 계산
   updatePolygonCount()
   
@@ -375,7 +427,7 @@ const animate = (currentTime = 0) => {
 const updatePolygonCount = () => {
   let count = 0
   scene.traverse((object) => {
-    if (object instanceof THREE.Mesh) {
+    if (object instanceof THREE.Mesh && object.visible) {
       const geometry = object.geometry
       if (geometry.index) {
         count += geometry.index.count / 3
@@ -412,6 +464,22 @@ const toggleLights = () => {
       object.visible = lightsOn.value
     }
   })
+}
+
+const toggleCulling = () => {
+  cullingEnabled.value = !cullingEnabled.value
+  
+  if (!cullingEnabled.value) {
+    // Culling이 비활성화되면 모든 객체를 보이게 함
+    scene.traverse((child) => {
+      if (child instanceof THREE.Mesh || child instanceof THREE.Group) {
+        child.visible = true
+      }
+    })
+    visibleObjects.value = objects.value.length
+  }
+  
+  console.log(`Frustum Culling ${cullingEnabled.value ? '활성화' : '비활성화'}`)
 }
 
 const updateWallHeight = () => {
