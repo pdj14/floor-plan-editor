@@ -63,7 +63,7 @@
         <span>Polygons: {{ polygonCount }}</span>
         <span>FPS: {{ fps }}</span>
         <span v-if="lodEnabled" class="lod-status">
-          LOD: {{ shouldUseLOD() ? 'ON' : 'OFF' }} ({{ visibleObjects }}/{{ lodThreshold }})
+          LOD: {{ shouldUseLOD() ? 'ON' : 'OFF' }} (15m 거리 기반)
         </span>
       </div>
     </div>
@@ -76,6 +76,8 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { useFloorplanStore } from '../stores/floorplanStore'
+
+// Three.js LOD 클래스는 THREE.LOD로 사용 가능
 
 // 상태 관리
 const canvas3d = ref<HTMLCanvasElement>()
@@ -145,31 +147,21 @@ const updateObjectVisibility = () => {
         }
       }
       
-      // LOD 객체는 카운트하지 않음 (중복 방지)
+      // Three.js LOD 객체는 카운트하지 않음 (중복 방지)
       if (isVisible && child.userData.type !== 'placed-object-lod') {
         visibleCount++
       }
     }
   })
   
-  // visible 개수가 변경되었을 때만 LOD 업데이트 스케줄링
-  if (visibleCount !== lastVisibleCount) {
-    lastVisibleCount = visibleCount
-    scheduleLODUpdate()
-  }
-  
+  // Three.js LOD는 자동으로 처리되므로 수동 스케줄링 불필요
   visibleObjects.value = visibleCount
 }
 
-// LOD 시스템 관련 함수들
+// Three.js 내장 LOD 시스템 사용 - 수동 전환 로직 제거
 const shouldUseLOD = (): boolean => {
-  const shouldUse = lodEnabled.value && visibleObjects.value > lodThreshold.value
-  // 전환이 있을 때만 로그 출력 (디버깅용)
-  if (shouldUse !== lastLODState) {
-  
-    lastLODState = shouldUse
-  }
-  return shouldUse
+  // Three.js LOD는 자동으로 거리 기반 전환을 처리하므로 항상 true 반환
+  return lodEnabled.value
 }
 
 // LOD 색상 매핑 함수 (파스텔 톤)
@@ -186,110 +178,19 @@ const getLODColor = (category: string): number => {
   return colorMap[category] || colorMap.default
 }
 
-// LOD 상태 추적용 변수
-let lastLODState = false
-let lodUpdateTimeout: number | null = null
+// Three.js LOD 상태 추적용 변수
 let lastVisibleCount = 0
 
+// Three.js 내장 LOD 사용 - 수동 업데이트 불필요
 const updateLOD = () => {
-  
-  if (!scene) return
-  
-  // placed-object가 있는지 먼저 확인
-  const placedObjects = scene.children.filter(child => 
-    child.userData?.type === 'placed-object'
-  )
-
-
-  
-  // placed-object가 없으면 LOD 체크하지 않음
-  if (placedObjects.length === 0) {
-
-    return
-  }
-  
-  const useLOD = shouldUseLOD()
-  let lodSwitchCount = 0
-  let totalObjects = 0
-  let objectsWithLOD = 0
-  
-
-  
-  // placed-object만 처리 (전체 scene traverse 대신)
-  placedObjects.forEach((child) => {
-    if (child.userData && child.userData.type === 'placed-object') {
-      totalObjects++
-      const originalObject = child
-      const lodObject = child.userData.lodObject
-      
-      
-      
-      if (originalObject && lodObject) {
-        objectsWithLOD++
-        const wasOriginalVisible = originalObject.userData.wasVisible !== false
-        
-        
-        
-        // LOD 조건에 따라 객체 전환
-        if (useLOD && wasOriginalVisible) {
-
-          // LOD 모드로 전환
-          originalObject.visible = false
-          lodObject.visible = true
-          lodSwitchCount++
-          
-        } else if (!useLOD && wasOriginalVisible) {
-          // 원본 모드로 전환
-          originalObject.visible = true
-          lodObject.visible = false
-          
-          
-          // LOD 모델의 머티리얼을 원본 색상으로 복원
-          lodObject.traverse((child: any) => {
-            if (child.isMesh && child.material && child.userData.originalMaterial) {
-              const original = child.userData.originalMaterial
-              if (original.color) {
-                child.material.color.copy(original.color)
-                child.material.needsUpdate = true
-                
-              }
-            }
-          })
-          
-          lodSwitchCount++
-          
-        } else {
-          // 가시성이 false인 경우 둘 다 숨김
-          originalObject.visible = false
-          lodObject.visible = false
-          
-        }
-      } else {
-        
-      }
-    }
-  })
-  
-  
-  
-  // 전환이 있을 때만 로그 출력
-  if (lodSwitchCount > 0) {
-
-  }
+  // Three.js LOD는 자동으로 거리 기반 전환을 처리하므로 수동 업데이트 불필요
+  console.log('🎯 Three.js LOD 자동 처리 중 - 수동 업데이트 불필요')
 }
 
-// 지연된 LOD 업데이트 함수
+// Three.js LOD는 자동으로 처리되므로 스케줄링 불필요
 const scheduleLODUpdate = () => {
-  // 기존 타임아웃이 있으면 취소
-  if (lodUpdateTimeout !== null) {
-    clearTimeout(lodUpdateTimeout)
-  }
-  
-  // 500ms 후에 LOD 업데이트 실행
-  lodUpdateTimeout = setTimeout(() => {
-    updateLOD()
-    lodUpdateTimeout = null
-  }, 500)
+  // Three.js LOD는 자동으로 거리 기반 전환을 처리하므로 수동 스케줄링 불필요
+  console.log('🎯 Three.js LOD 자동 스케줄링 - 수동 처리 불필요')
 }
 
 // Three.js 초기화
@@ -471,7 +372,7 @@ const animate = (currentTime = 0) => {
   updateFrustum()
   updateObjectVisibility()
   
-  // LOD 업데이트는 updateObjectVisibility에서 스케줄링됨
+  // Three.js LOD는 자동으로 처리됨 - 수동 업데이트 불필요
   
   // 폴리곤 수 계산
   updatePolygonCount()
@@ -538,12 +439,12 @@ const toggleCulling = () => {
 const toggleLOD = () => {
   lodEnabled.value = !lodEnabled.value
   
-  // LOD 상태 변경 시 즉시 업데이트 (지연 없이)
-  if (lodUpdateTimeout !== null) {
-    clearTimeout(lodUpdateTimeout)
-    lodUpdateTimeout = null
+  console.log(`🎯 LOD ${lodEnabled.value ? '활성화' : '비활성화'}`)
+  
+  // LOD 상태 변경 시 기존 객체들의 LOD 적용/해제
+  if (floorplanStore.placedObjects.length > 0) {
+    updatePlacedObjectsIn3D(floorplanStore.placedObjects)
   }
-  updateLOD()
 }
 
 const updateWallHeight = () => {
@@ -608,16 +509,16 @@ const updatePlacedObjectsIn3D = async (placedObjects: any[]) => {
   }
 }
 
-// 3D 오브젝트 생성 (GLB 모델 로딩)
+// 3D 오브젝트 생성 (GLB 모델 로딩) - Three.js 내장 LOD 사용
 const create3DObjects = async (placedObjects: any[]) => {
-
+  console.log('🎯 create3DObjects 시작 - Three.js 내장 LOD 사용')
   
   if (!scene || !placedObjects || placedObjects.length === 0) {
-    
+    console.log('❌ 씬이 없거나 배치할 객체가 없음')
     return
   }
 
-  // 기존 배치 오브젝트 제거 (원본과 LOD 모두)
+  // 기존 배치 오브젝트 제거
   const existingObjects = scene.children.filter(child => 
     child.userData.type === 'placed-object' || child.userData.type === 'placed-object-lod'
   )
@@ -648,7 +549,8 @@ const create3DObjects = async (placedObjects: any[]) => {
     }
     
     try {
-    console.log('loader.load', placedObj)
+      console.log('loader.load', placedObj)
+      
       // 메인 모델 로드
       const gltf = await new Promise<any>((resolve, reject) => {
         loader.load(
@@ -666,12 +568,11 @@ const create3DObjects = async (placedObjects: any[]) => {
 
       if (placedObj.lodUrl) {
         try {
-          
           const lodGltf = await new Promise<any>((resolve, reject) => {
             loader.load(
               placedObj.lodUrl,
               (gltf) => {
-                
+                console.log(`✅ ${placedObj.name} LOD GLB 로딩 성공`)
                 resolve(gltf)
               },
               undefined,
@@ -685,23 +586,21 @@ const create3DObjects = async (placedObjects: any[]) => {
           
           lodModel = lodGltf.scene.clone()
           
-          
           // LOD 모델의 메시 정보 확인
           let lodMeshCount = 0
           if (lodModel) {
             lodModel.traverse((child: any) => {
               if (child.isMesh) {
                 lodMeshCount++
-  
+                console.log(`📊 ${placedObj.name} LOD 모델 메시: ${lodMeshCount}개`)
               }
             })
-
           }
         } catch (lodError) {
           console.warn(`${placedObj.name} LOD 모델 로드 실패:`, lodError)
         }
       } else {
-        
+        console.log(`ℹ️ ${placedObj.name} LOD 모델 없음`)
       }
       
       // 모델 크기 조정 (width, depth, height 기준)
@@ -721,46 +620,27 @@ const create3DObjects = async (placedObjects: any[]) => {
         z: placedObj.position.y
       }
       
-      model.position.set(pos3D.x, pos3D.y, pos3D.z)
-      
       // 모델 회전 설정 (Y축 수직 회전)
       const rotationValue = placedObj.rotation
-      model.rotation.y = -rotationValue
       
-      // LOD 모델이 있는 경우 동일한 스케일, 위치, 회전 적용
+      // LOD 모델이 있는 경우 동일한 스케일 적용 (위치는 LOD 객체에서 설정)
       if (lodModel) {
         lodModel.scale.set(scaleX, scaleY, scaleZ)
-        lodModel.position.set(pos3D.x, pos3D.y, pos3D.z) // 원본과 동일한 위치
-        lodModel.rotation.y = -rotationValue // 원본과 동일한 회전
+        // LOD 모델의 위치는 (0,0,0)으로 설정 (LOD 객체가 위치를 관리)
+        lodModel.position.set(0, 0, 0)
+        lodModel.rotation.y = -rotationValue
         
-        // LOD 모델은 초기에 숨김
-        lodModel.visible = false
-        
-        
-        
-        // LOD 모델에 메타데이터 설정
-        lodModel.userData = {
-          type: 'placed-object-lod',
-          placedObjectId: placedObj.id,
-          objectName: placedObj.name,
-          category: placedObj.category,
-          height: placedObj.height,
-          boxId: placedObj.boxId,
-          lodUrl: placedObj.lodUrl,  // LOD URL 정보 추가
-          glbUrl: placedObj.glbUrl   // 원본 URL 정보 추가
-        }
-        
-        // LOD 모델의 모든 머티리얼을 단일 색상으로 변경 (성능 최적화)
+        // LOD 모델의 모든 머티리얼을 단일 색상으로 변경
         lodModel.traverse((child: any) => {
           if (child.isMesh && child.material) {
-            // 기존 머티리얼의 색상 정보만 저장 (텍스처 맵은 저장하지 않음)
+            // 기존 머티리얼의 색상 정보 저장
             if (!child.userData.originalMaterial) {
               child.userData.originalMaterial = {
                 color: child.material.color?.clone()
               }
             }
             
-            // 완전히 새로운 단일 색상 머티리얼로 교체
+            // 단일 색상 머티리얼로 교체
             const lodColor = getLODColor(placedObj.category)
             const newMaterial = new THREE.MeshStandardMaterial({
               color: lodColor,
@@ -768,56 +648,60 @@ const create3DObjects = async (placedObjects: any[]) => {
               metalness: 0.0
             })
             
-            // 기존 머티리얼 정리
             if (child.material.dispose) {
               child.material.dispose()
             }
             
-            // 새 머티리얼 적용
             child.material = newMaterial
-            
-            
           }
         })
       }
       
-      // 메타데이터 설정 (LOD 연결을 위해 userData를 나중에 설정)
-      const userData: any = {
+      // Three.js 내장 LOD 사용
+      let finalObject: THREE.Object3D
+      
+      if (lodModel && lodEnabled.value) {
+        // LOD 객체 생성
+        const lod = new THREE.LOD()
+        
+        // 원본 모델 위치와 회전 설정
+        model.position.set(0, 0, 0)
+        model.rotation.y = -rotationValue
+        
+        // 고해상도 모델 (가까울 때 - 0-15 거리)
+        lod.addLevel(model, 0)
+        
+        // 저해상도 모델 (멀 때 - 15+ 거리)
+        lod.addLevel(lodModel, 15)
+        
+        // LOD 객체 자체의 위치 설정
+        lod.position.set(pos3D.x, pos3D.y, pos3D.z)
+        
+        finalObject = lod
+        
+        console.log(`🎯 ${placedObj.name} Three.js LOD 생성 완료`)
+      } else {
+        // LOD가 없거나 비활성화된 경우 원본 모델만 사용
+        model.position.set(pos3D.x, pos3D.y, pos3D.z)
+        model.rotation.y = -rotationValue
+        finalObject = model
+        console.log(`📦 ${placedObj.name} 원본 모델만 사용`)
+      }
+      
+      // 메타데이터 설정
+      finalObject.userData = {
         type: 'placed-object',
         placedObjectId: placedObj.id,
         objectName: placedObj.name,
         category: placedObj.category,
         height: placedObj.height,
         boxId: placedObj.boxId,
-        glbUrl: placedObj.glbUrl,   // 원본 URL 정보 추가
-        lodUrl: placedObj.lodUrl    // LOD URL 정보 추가
+        glbUrl: placedObj.glbUrl,
+        lodUrl: placedObj.lodUrl,
+        usesLOD: lodModel && lodEnabled.value
       }
       
-      scene.add(model)
-      
-      // LOD 모델이 있는 경우 씬에 추가하고 연결
-      if (lodModel) {
-        scene.add(lodModel)
-        
-        // userData에 LOD 연결 정보 추가
-        userData.lodObject = lodModel
-        lodModel.userData.originalObject = model
-        
-        
-        
-        // 즉시 확인: 연결이 제대로 되었는지 테스트
-        
-        
-        // 1초 후 다시 확인 (비동기 문제 확인)
-        setTimeout(() => {
-
-        }, 1000)
-      } else {
-        
-      }
-      
-      // 최종적으로 model.userData 설정 (LOD 정보 포함)
-      model.userData = { ...userData } // 객체 복사로 변경
+      scene.add(finalObject)
       
     } catch (error) {
       console.error(`❌ GLB 모델 로딩 실패 (${placedObj.name}):`, error)
@@ -1134,11 +1018,7 @@ onUnmounted(() => {
   }
   window.removeEventListener('resize', handleResize)
   
-  // LOD 업데이트 타임아웃 정리
-  if (lodUpdateTimeout !== null) {
-    clearTimeout(lodUpdateTimeout)
-    lodUpdateTimeout = null
-  }
+  // Three.js LOD는 자동으로 처리되므로 타임아웃 정리 불필요
   
   // Three.js 리소스 정리
   if (renderer) {
