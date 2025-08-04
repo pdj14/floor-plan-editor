@@ -248,8 +248,7 @@ const initThreeJS = () => {
 
   // 카메라 컨트롤 설정
   controls = new OrbitControls(camera, renderer.domElement)
-  controls.enableDamping = true
-  controls.dampingFactor = 0.25
+  controls.enableDamping = false  // 줌인 후 이동 속도 문제 해결을 위해 비활성화
   controls.maxPolarAngle = Math.PI / 2.5
   controls.minPolarAngle = 0
   controls.target.set(0, 0, 0)
