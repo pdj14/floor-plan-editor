@@ -388,18 +388,7 @@ const defaultObjects: GameObject[] = [
     depth: 1.2,
     height: 2.0
   },
-  {
-    id: 'default-txi-equipment',
-    name: 'TXI',
-    category: 'equipment',
-    glbUrl: '/txi.glb',
-    thumbnail: '/설비.png',
-    description: 'TXI 설비',
-    size: '5.0m × 3.0m × 1.0m',
-    width: 5.0,
-    depth: 3.0,
-    height: 1.0
-  },
+
   {
     id: 'default-rack1',
     name: 'Rack1',
@@ -413,30 +402,8 @@ const defaultObjects: GameObject[] = [
     depth: 1.0,
     height: 2.0
   },
-  {
-    id: 'default-rack2',
-    name: 'Rack2',
-    category: 'equipment',
-    glbUrl: '/Rack2.glb',
-    thumbnail: '/Rack2.png',
-    description: 'Rack2 설비',
-    size: '0.8m × 3.0m × 2.0m',
-    width: 0.8,
-    depth: 3.0,
-    height: 2.0
-  },
-  {
-    id: 'default-equipment2',
-    name: '설비2',
-    category: 'equipment',
-    glbUrl: '/설비2.glb',
-    thumbnail: '/설비2.png',
-    description: '설비2',
-    size: '1.0m × 2.0m × 2.0m',
-    width: 1.0,
-    depth: 2.0,
-    height: 2.0
-  },
+
+
   {
     id: 'default-tv',
     name: 'TV',
@@ -449,18 +416,7 @@ const defaultObjects: GameObject[] = [
     depth: 0.08,  // 세로 (두께) - TV는 얇음
     height: 0.84  // 높이 (화면 높이) - TV는 세로가 더 큼
   },
-  {
-    id: 'default-robot-vacuum',
-    name: '로봇청소기',
-    category: 'appliances',
-    glbUrl: '/로봇청소기.glb',
-    thumbnail: '/로봇청소기.png',
-    description: '스마트 로봇 청소기',
-    size: '0.35m × 0.35m × 0.08m',
-    width: 0.35,  // 가로 (지름)
-    depth: 0.35,  // 세로 (지름)
-    height: 0.08  // 높이 (두께)
-  },
+
   {
     id: 'default-washing-machine',
     name: '세탁기',
