@@ -15,9 +15,12 @@
         <button @click="toggleCulling" class="btn btn-secondary" title="Toggle Frustum Culling">
           {{ cullingEnabled ? '👁️' : '🙈' }} Culling
         </button>
-        <button @click="toggleLOD" class="btn btn-secondary" title="Toggle LOD">
-          {{ lodEnabled ? '🎯' : '🎲' }} LOD
-        </button>
+                 <button @click="toggleLOD" class="btn btn-secondary" title="Toggle LOD">
+           {{ lodEnabled ? '🎯' : '🎲' }} LOD
+         </button>
+         <button @click="toggleWallTransparency" class="btn btn-secondary" title="Toggle Wall Transparency">
+           {{ wallTransparencyEnabled ? '🔍' : '🧱' }} Wall Transparency
+         </button>
       </div>
       
       <div class="control-group">
@@ -29,19 +32,30 @@
         </button>
       </div>
       
-      <div class="control-group">
-        <label>
-          Height: {{ wallHeight }}m
-          <input 
-            type="range" 
-            v-model="wallHeight" 
-            min="2" 
-            max="5" 
-            step="0.1"
-            @input="updateWallHeight"
-          />
-        </label>
-      </div>
+             <div class="control-group">
+         <label>
+           Height: {{ wallHeight }}m
+           <input 
+             type="range" 
+             v-model="wallHeight" 
+             min="2" 
+             max="5" 
+             step="0.1"
+             @input="updateWallHeight"
+           />
+         </label>
+                   <label v-if="wallTransparencyEnabled">
+            Opacity: {{ wallOpacity }}%
+            <input 
+              type="range" 
+              v-model="wallOpacity" 
+              min="10" 
+              max="100" 
+              step="5"
+              @input="updateWallOpacity"
+            />
+          </label>
+       </div>
     </div>
 
     <!-- 3D 캔버스 -->
@@ -62,9 +76,12 @@
         <span>Visible: {{ visibleObjects }}</span>
         <span>Polygons: {{ polygonCount }}</span>
         <span>FPS: {{ fps }}</span>
-        <span v-if="lodEnabled" class="lod-status">
-          LOD: {{ shouldUseLOD() ? 'ON' : 'OFF' }} (15m 거리 기반)
-        </span>
+                 <span v-if="lodEnabled" class="lod-status">
+           LOD: {{ shouldUseLOD() ? 'ON' : 'OFF' }} (통일된 회색)
+         </span>
+         <span v-else class="lod-status lod-disabled">
+           LOD: OFF
+         </span>
       </div>
     </div>
   </div>
@@ -75,6 +92,8 @@ import { ref, onMounted, onUnmounted, watch } from 'vue'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js'
+import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js'
 import { useFloorplanStore } from '../stores/floorplanStore'
 
 // Three.js LOD 클래스는 THREE.LOD로 사용 가능
@@ -95,6 +114,8 @@ const loading = ref(false)
 const wireframe = ref(false)
 const lightsOn = ref(true)
 const wallHeight = ref(2.5)
+const wallOpacity = ref(100) // 벽 투명도 (10-100%)
+const wallTransparencyEnabled = ref(false) // 벽 투명도 활성화 여부
 const objects = ref<THREE.Object3D[]>([])
 const polygonCount = ref(0)
 const fps = ref(0)
@@ -102,6 +123,11 @@ const visibleObjects = ref(0)
 const cullingEnabled = ref(true)
 const lodEnabled = ref(true)
 const lodThreshold = ref(10) // LOD 활성화 임계값 (보이는 객체 수)
+
+// 3D 팝업 관련 상태
+const raycaster = new THREE.Raycaster()
+const mouse = new THREE.Vector2()
+let current3DPopup: THREE.Group | null = null
 
 // Pinia Store 사용
 const floorplanStore = useFloorplanStore()
@@ -164,18 +190,9 @@ const shouldUseLOD = (): boolean => {
   return lodEnabled.value
 }
 
-// LOD 색상 매핑 함수 (파스텔 톤)
-const getLODColor = (category: string): number => {
-  const colorMap: { [key: string]: number } = {
-    'av': 0xB8D4E3,      // 파스텔 파란색 (AV 기기)
-    'robot': 0xC8E6C9,   // 파스텔 초록색 (로봇)
-    'appliance': 0xFFE0B2, // 파스텔 주황색 (가전제품)
-    'furniture': 0xD7CCC8, // 파스텔 베이지색 (가구)
-    'etc': 0xE1BEE7,     // 파스텔 보라색 (기타)
-    'default': 0xF5F5F5  // 파스텔 회색 (기본)
-  }
-  
-  return colorMap[category] || colorMap.default
+// 통일된 LOD 색상 (모든 객체에 동일한 회색 적용)
+const getLODColor = (): number => {
+  return 0xCCCCCC // #CCCCCC - 밝은 회색
 }
 
 // Three.js LOD 상태 추적용 변수
@@ -258,6 +275,12 @@ const initThreeJS = () => {
   // Frustum 초기화
   updateFrustum()
   
+  // 기본 폰트 로딩
+  loadDefaultFont()
+  
+  // 클릭 이벤트 리스너 추가
+  canvas3d.value.addEventListener('click', handleCanvasClick)
+  
   // 렌더링 시작
   animate()
 }
@@ -325,10 +348,11 @@ const createWall = (wall: any, wallType: string, color: number, canvasWidth: num
   const angle = Math.atan2(start.y - end.y, end.x - start.x)
   
   const wallGeometry = new THREE.BoxGeometry(length / 40, wallHeight.value, 0.1)
+  const opacity = wallTransparencyEnabled.value ? wallOpacity.value / 100 : 1.0
   const wallMaterial = new THREE.MeshLambertMaterial({ 
     color: color,
-    transparent: false,
-    opacity: 1.0
+    transparent: wallTransparencyEnabled.value && opacity < 1,
+    opacity: opacity
   })
   
   const wallMesh = new THREE.Mesh(wallGeometry, wallMaterial)
@@ -371,6 +395,11 @@ const animate = (currentTime = 0) => {
   // Frustum Culling 업데이트
   updateFrustum()
   updateObjectVisibility()
+  
+  // 3D 팝업 빌보딩 업데이트
+  if (current3DPopup) {
+    current3DPopup.lookAt(camera.position)
+  }
   
   // Three.js LOD는 자동으로 처리됨 - 수동 업데이트 불필요
   
@@ -465,6 +494,43 @@ const updateWallHeight = () => {
   })
 }
 
+const updateWallOpacity = () => {
+  scene.traverse((object) => {
+    if ((object.userData.type === 'exterior-wall' || object.userData.type === 'interior-wall') && object instanceof THREE.Mesh) {
+      if (object.material instanceof THREE.MeshLambertMaterial) {
+        const opacity = wallOpacity.value / 100
+        object.material.transparent = opacity < 1
+        object.material.opacity = opacity
+        object.material.needsUpdate = true
+      }
+    }
+  })
+}
+
+const toggleWallTransparency = () => {
+  wallTransparencyEnabled.value = !wallTransparencyEnabled.value
+  
+  scene.traverse((object) => {
+    if ((object.userData.type === 'exterior-wall' || object.userData.type === 'interior-wall') && object instanceof THREE.Mesh) {
+      if (object.material instanceof THREE.MeshLambertMaterial) {
+        if (wallTransparencyEnabled.value) {
+          // 투명도 활성화: 설정된 투명도 적용
+          const opacity = wallOpacity.value / 100
+          object.material.transparent = opacity < 1
+          object.material.opacity = opacity
+        } else {
+          // 투명도 비활성화: 완전 불투명으로 설정
+          object.material.transparent = false
+          object.material.opacity = 1.0
+        }
+        object.material.needsUpdate = true
+      }
+    }
+  })
+  
+  console.log(`🧱 벽 투명도 ${wallTransparencyEnabled.value ? '활성화' : '비활성화'}`)
+}
+
 // 실시간 3D 오브젝트 업데이트 (Store 변경 감지용)
 const updatePlacedObjectsIn3D = async (placedObjects: any[]) => {
 
@@ -473,9 +539,14 @@ const updatePlacedObjectsIn3D = async (placedObjects: any[]) => {
     
     return
   }
+  
+  // 3D 팝업 제거
+  remove3DPopup()
 
-  // 기존 배치 오브젝트 모두 제거
-  const existingObjects = scene.children.filter(child => child.userData.type === 'placed-object')
+  // 기존 배치 오브젝트와 상태 표시 구체, 3D 팝업 모두 제거
+  const existingObjects = scene.children.filter(child => 
+    child.userData.type === 'placed-object' || child.userData.type === 'status-sphere' || child.userData.type === '3d-popup'
+  )
   
   existingObjects.forEach((obj) => {
     scene.remove(obj)
@@ -518,9 +589,9 @@ const create3DObjects = async (placedObjects: any[]) => {
     return
   }
 
-  // 기존 배치 오브젝트 제거
+  // 기존 배치 오브젝트와 상태 표시 구체, 3D 팝업 제거
   const existingObjects = scene.children.filter(child => 
-    child.userData.type === 'placed-object' || child.userData.type === 'placed-object-lod'
+    child.userData.type === 'placed-object' || child.userData.type === 'placed-object-lod' || child.userData.type === 'status-sphere' || child.userData.type === '3d-popup'
   )
   existingObjects.forEach(obj => {
     scene.remove(obj)
@@ -640,8 +711,8 @@ const create3DObjects = async (placedObjects: any[]) => {
               }
             }
             
-            // 단일 색상 머티리얼로 교체
-            const lodColor = getLODColor(placedObj.category)
+                         // 통일된 색상 머티리얼로 교체
+             const lodColor = getLODColor()
             const newMaterial = new THREE.MeshStandardMaterial({
               color: lodColor,
               roughness: 0.5,
@@ -657,36 +728,44 @@ const create3DObjects = async (placedObjects: any[]) => {
         })
       }
       
-      // Three.js 내장 LOD 사용
-      let finalObject: THREE.Object3D
-      
-      if (lodModel && lodEnabled.value) {
-        // LOD 객체 생성
-        const lod = new THREE.LOD()
-        
-        // 원본 모델 위치와 회전 설정
-        model.position.set(0, 0, 0)
-        model.rotation.y = -rotationValue
-        
-        // 고해상도 모델 (가까울 때 - 0-15 거리)
-        lod.addLevel(model, 0)
-        
-        // 저해상도 모델 (멀 때 - 15+ 거리)
-        lod.addLevel(lodModel, 15)
-        
-        // LOD 객체 자체의 위치 설정
-        lod.position.set(pos3D.x, pos3D.y, pos3D.z)
-        
-        finalObject = lod
-        
-        console.log(`🎯 ${placedObj.name} Three.js LOD 생성 완료`)
-      } else {
-        // LOD가 없거나 비활성화된 경우 원본 모델만 사용
-        model.position.set(pos3D.x, pos3D.y, pos3D.z)
-        model.rotation.y = -rotationValue
-        finalObject = model
-        console.log(`📦 ${placedObj.name} 원본 모델만 사용`)
-      }
+             // 단순한 토글 기반 LOD 사용
+       let finalObject: THREE.Object3D
+       
+       if (lodEnabled.value) {
+         // LOD 모드: 통일된 회색 모델 사용
+         if (lodModel) {
+           // LOD 모델을 메인으로 사용
+           lodModel.position.set(pos3D.x, pos3D.y, pos3D.z)
+           lodModel.rotation.y = -rotationValue
+           finalObject = lodModel
+           console.log(`🎯 ${placedObj.name} LOD 모드 - 통일된 회색 적용`)
+         } else {
+           // LOD 모델이 없으면 원본 모델에 회색 적용
+           model.traverse((child: any) => {
+             if (child.isMesh && child.material) {
+               const newMaterial = new THREE.MeshStandardMaterial({
+                 color: getLODColor(),
+                 roughness: 0.5,
+                 metalness: 0.0
+               })
+               if (child.material.dispose) {
+                 child.material.dispose()
+               }
+               child.material = newMaterial
+             }
+           })
+           model.position.set(pos3D.x, pos3D.y, pos3D.z)
+           model.rotation.y = -rotationValue
+           finalObject = model
+           console.log(`🎯 ${placedObj.name} LOD 모드 - 원본 모델에 회색 적용`)
+         }
+       } else {
+         // 일반 모드: 원본 모델 사용
+         model.position.set(pos3D.x, pos3D.y, pos3D.z)
+         model.rotation.y = -rotationValue
+         finalObject = model
+         console.log(`📦 ${placedObj.name} 일반 모드 - 원본 모델 사용`)
+       }
       
       // 메타데이터 설정
       finalObject.userData = {
@@ -698,10 +777,13 @@ const create3DObjects = async (placedObjects: any[]) => {
         boxId: placedObj.boxId,
         glbUrl: placedObj.glbUrl,
         lodUrl: placedObj.lodUrl,
-        usesLOD: lodModel && lodEnabled.value
+                 usesLOD: lodEnabled.value
       }
       
       scene.add(finalObject)
+      
+      // 상태 표시용 구체 추가
+      addStatusSphere(finalObject, placedObj)
       
     } catch (error) {
       console.error(`❌ GLB 모델 로딩 실패 (${placedObj.name}):`, error)
@@ -722,6 +804,414 @@ const create3DObjects = async (placedObjects: any[]) => {
         boxId: placedObj.boxId
       }
       scene.add(fallbackMesh)
+      
+      // 오류 객체에도 상태 표시 구체 추가
+      addStatusSphere(fallbackMesh, placedObj)
+    }
+  }
+}
+
+// 상태 표시용 구체 생성 함수
+const addStatusSphere = (object: THREE.Object3D, placedObj: any) => {
+  // 객체의 바운딩 박스 계산
+  const box = new THREE.Box3().setFromObject(object)
+  const size = box.getSize(new THREE.Vector3())
+  
+  // 구체 크기 계산 (객체 크기의 15%로 설정, 최소 0.1, 최대 0.3)
+  const sphereRadius = Math.max(0.1, Math.min(0.3, Math.max(size.x, size.y, size.z) * 0.15))
+  
+  // 구체 지오메트리와 머티리얼 생성
+  const sphereGeometry = new THREE.SphereGeometry(sphereRadius, 16, 16)
+  const sphereMaterial = new THREE.MeshStandardMaterial({
+    color: 0xA0B8D9, // 파스텔 파란색
+    transparent: true,
+    opacity: 0.8,
+    roughness: 0.3,
+    metalness: 0.1
+  })
+  
+  const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial)
+  
+  // 구체 위치 설정 (객체 상단 중앙)
+  const objectTop = box.max.y
+  sphere.position.set(
+    object.position.x,
+    objectTop + sphereRadius * 1.2, // 객체 위에 약간의 간격을 두고 배치
+    object.position.z
+  )
+  
+  // 구체 메타데이터 설정
+  sphere.userData = {
+    type: 'status-sphere',
+    parentObjectId: placedObj.id,
+    parentObjectName: placedObj.name,
+    category: placedObj.category
+  }
+  
+  // 씬에 구체 추가
+  scene.add(sphere)
+  
+  console.log(`🔵 상태 표시 구체 추가: ${placedObj.name} (반지름: ${sphereRadius.toFixed(2)})`)
+}
+
+// 폰트 로딩 및 텍스트 렌더링 시스템
+let loadedFont: any = null
+const fontLoader = new FontLoader()
+
+// 기본 폰트 로딩 (실제 폰트 파일 사용)
+const loadDefaultFont = () => {
+  // 기본 폰트 데이터 (실제 폰트 파일이 없을 때 사용할 fallback)
+  const fontData = {
+    familyName: 'Arial',
+    ascender: 0.8,
+    descender: -0.2,
+    underlinePosition: -0.1,
+    underlineThickness: 0.05,
+    boundingBox: {
+      yMin: -0.2,
+      yMax: 0.8,
+      xMin: 0,
+      xMax: 0
+    },
+    glyphs: {}
+  }
+  
+  // 기본 문자들에 대한 간단한 기하학적 형태 정의
+  const basicGlyphs = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789가나다라마바사아자차카타파하:()×°'
+  basicGlyphs.split('').forEach(char => {
+    (fontData.glyphs as any)[char] = {
+      ha: 0.6, // 기본 너비
+      x_min: 0,
+      x_max: 0.5,
+      o: `m 0 0 l 0.5 0 l 0.5 0.6 l 0 0.6 z` // 간단한 사각형 형태
+    }
+  })
+  
+  loadedFont = fontData
+  console.log('📝 기본 폰트 로딩 완료')
+}
+
+// 3D 텍스트 생성 함수 (개선된 버전)
+const create3DText = (text: string, size: number = 0.1, color: number = 0x000000, position: THREE.Vector3 = new THREE.Vector3()) => {
+  if (!loadedFont) {
+    loadDefaultFont()
+  }
+  
+  // 텍스트 그룹 생성
+  const textGroup = new THREE.Group()
+  
+  // 텍스트를 여러 개의 작은 평면으로 표현 (개선된 버전)
+  const charWidth = size * 0.5
+  const charHeight = size * 0.7
+  const charSpacing = size * 0.05
+  
+  // 한글과 영문을 구분하여 처리
+  const processText = (text: string) => {
+    const chars = []
+    for (let i = 0; i < text.length; i++) {
+      const char = text[i]
+      const charCode = char.charCodeAt(0)
+      
+      // 한글 범위: 44032-55203 (가-힣)
+      if (charCode >= 44032 && charCode <= 55203) {
+        chars.push({ char, isKorean: true })
+      } else {
+        chars.push({ char, isKorean: false })
+      }
+    }
+    return chars
+  }
+  
+  const processedChars = processText(text)
+  
+  processedChars.forEach((charInfo, index) => {
+    const { char, isKorean } = charInfo
+    
+    // 한글과 영문에 따라 크기 조정
+    const finalCharWidth = isKorean ? charWidth * 1.2 : charWidth
+    const finalCharHeight = isKorean ? charHeight * 1.1 : charHeight
+    
+    const charGeometry = new THREE.PlaneGeometry(finalCharWidth, finalCharHeight)
+    const charMaterial = new THREE.MeshBasicMaterial({ 
+      color: color,
+      transparent: true,
+      opacity: 0.95,
+      side: THREE.DoubleSide
+    })
+    const charMesh = new THREE.Mesh(charGeometry, charMaterial)
+    
+    // 위치 계산 (한글과 영문의 크기 차이 고려)
+    let xOffset = 0
+    for (let i = 0; i < index; i++) {
+      const prevChar = processedChars[i]
+      const prevWidth = prevChar.isKorean ? charWidth * 1.2 : charWidth
+      xOffset += prevWidth + charSpacing
+    }
+    
+    charMesh.position.set(
+      xOffset - (processedChars.reduce((total, c) => total + (c.isKorean ? charWidth * 1.2 : charWidth), 0) + (processedChars.length - 1) * charSpacing) / 2,
+      0,
+      0
+    )
+    
+    // 한글 문자에 대한 시각적 표시 (디버깅용)
+    if (isKorean) {
+      // 한글 문자는 약간 다른 색상으로 표시
+      charMaterial.color.setHex(0x0000ff) // 파란색으로 표시
+    }
+    
+    textGroup.add(charMesh)
+  })
+  
+  textGroup.position.copy(position)
+  return textGroup
+}
+
+// 더 나은 텍스트 렌더링을 위한 Canvas 기반 텍스트 생성
+const createCanvasText = (text: string, size: number = 0.1, color: number = 0x000000, position: THREE.Vector3 = new THREE.Vector3()) => {
+  // Canvas를 사용하여 텍스트를 텍스처로 렌더링
+  const canvas = document.createElement('canvas')
+  const context = canvas.getContext('2d')
+  
+  if (!context) {
+    return create3DText(text, size, color, position) // fallback
+  }
+  
+  // Canvas 크기 설정 - 더 큰 해상도로 선명도 향상
+  const fontSize = Math.floor(size * 140) // 폰트 크기 더 증가
+  canvas.width = text.length * fontSize * 1.3
+  canvas.height = fontSize * 1.6
+  
+  // 배경을 투명하게
+  context.clearRect(0, 0, canvas.width, canvas.height)
+  
+  // 텍스트 그림자 효과 추가 (가독성 향상)
+  context.shadowColor = 'rgba(0, 0, 0, 0.7)' // 그림자 더 진하게
+  context.shadowBlur = 3
+  context.shadowOffsetX = 1
+  context.shadowOffsetY = 1
+  
+  // 폰트 설정 - 더 굵은 폰트로 가독성 향상
+  context.font = `bold ${fontSize}px Arial, sans-serif`
+  context.fillStyle = `#${color.toString(16).padStart(6, '0')}`
+  context.textAlign = 'center'
+  context.textBaseline = 'middle'
+  
+  // 텍스트 그리기
+  context.fillText(text, canvas.width / 2, canvas.height / 2)
+  
+  // 그림자 효과 제거
+  context.shadowColor = 'transparent'
+  context.shadowBlur = 0
+  context.shadowOffsetX = 0
+  context.shadowOffsetY = 0
+  
+  // 텍스처 생성
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.needsUpdate = true
+  
+  // 평면 메시 생성
+  const aspectRatio = canvas.width / canvas.height
+  const planeWidth = size * aspectRatio
+  const planeHeight = size
+  
+  const planeGeometry = new THREE.PlaneGeometry(planeWidth, planeHeight)
+  const planeMaterial = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    side: THREE.DoubleSide
+  })
+  
+  const planeMesh = new THREE.Mesh(planeGeometry, planeMaterial)
+  planeMesh.position.copy(position)
+  
+  return planeMesh
+}
+const create3DPopup = (objectData: any, spherePosition: THREE.Vector3) => {
+  // 기존 팝업 제거
+  remove3DPopup()
+  
+  // 팝업 그룹 생성
+  const popupGroup = new THREE.Group()
+  popupGroup.userData.type = '3d-popup'
+  
+  // 팝업 배경 (평면) - 크기 더 축소
+  const popupWidth = 2.4
+  const popupHeight = 2.1
+  const popupGeometry = new THREE.PlaneGeometry(popupWidth, popupHeight)
+  const popupMaterial = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.40, // 배경을 더 투명하게
+    side: THREE.DoubleSide
+  })
+  const popupBackground = new THREE.Mesh(popupGeometry, popupMaterial)
+  popupBackground.position.z = 0.01 // 약간 앞으로
+  popupGroup.add(popupBackground)
+  
+  // 팝업 테두리
+  const borderGeometry = new THREE.EdgesGeometry(popupGeometry)
+  const borderMaterial = new THREE.LineBasicMaterial({ color: 0x333333, linewidth: 2 })
+  const border = new THREE.LineSegments(borderGeometry, borderMaterial)
+  border.position.z = 0.02
+  popupGroup.add(border)
+  
+  // 텍스트 정보 그룹
+  const infoGroup = new THREE.Group()
+  
+  // 제목 배경
+  const titleBgGeometry = new THREE.PlaneGeometry(2.1, 0.35)
+  const titleBgMaterial = new THREE.MeshBasicMaterial({ color: 0x4a90e2 })
+  const titleBg = new THREE.Mesh(titleBgGeometry, titleBgMaterial)
+  titleBg.position.set(0, 0.8, 0.05)
+  infoGroup.add(titleBg)
+  
+  // 제목 텍스트 (Canvas 기반 텍스트 렌더링) - 크기 증가로 가독성 향상
+  const titleText = createCanvasText(objectData.objectName, 0.25, 0xffffff, new THREE.Vector3(0, 0.8, 0.06))
+  infoGroup.add(titleText)
+  
+  // 정보 라인들 (텍스트 정보를 색상으로 구분) - 크기 축소
+  const lineGeometry = new THREE.PlaneGeometry(2.0, 0.25)
+  const lineMaterial = new THREE.MeshBasicMaterial({ color: 0xf8f9fa })
+  
+  const infoLines = [
+    { y: 0.5, color: 0xe8f4fd, text: `카테고리: ${objectData.category}` },
+    { y: 0.2, color: 0xf0f0f0, text: `크기: ${objectData.width}×${objectData.depth}×${objectData.height}m` },
+    { y: -0.1, color: 0xe8f4fd, text: `위치: (${objectData.position.x.toFixed(1)}, ${objectData.position.y.toFixed(1)})` },
+    { y: -0.4, color: 0xf0f0f0, text: `회전: ${objectData.rotation}°` },
+    { y: -0.7, color: 0xe8f4fd, text: `상태: 정상` }
+  ]
+  
+  infoLines.forEach((line) => {
+    // 정보 라인 배경
+    const lineMesh = new THREE.Mesh(lineGeometry, lineMaterial.clone())
+    lineMesh.material.color.setHex(line.color)
+    lineMesh.position.set(0, line.y, 0.05)
+    infoGroup.add(lineMesh)
+    
+    // 실제 텍스트 (Canvas 기반 텍스트 렌더링) - 크기 증가로 가독성 향상
+    const textMesh = createCanvasText(line.text, 0.2, 0x000000, new THREE.Vector3(0, line.y, 0.06))
+    infoGroup.add(textMesh)
+  })
+  
+  // 버튼 제거 - Focus와 Close 버튼 삭제
+  
+  popupGroup.add(infoGroup)
+  
+  // 팝업 위치 설정 (구체 바로 위에 배치)
+  popupGroup.position.copy(spherePosition)
+  popupGroup.position.y += 1.0 // 구체 위 1.0유닛으로 더 높게 배치
+  
+  // 카메라를 향하도록 회전
+  popupGroup.lookAt(camera.position)
+  
+  scene.add(popupGroup)
+  current3DPopup = popupGroup
+  
+  console.log('🎯 3D 팝업 생성:', objectData.objectName, '위치:', spherePosition)
+}
+
+// 3D 팝업 제거
+const remove3DPopup = () => {
+  if (current3DPopup) {
+    scene.remove(current3DPopup)
+    current3DPopup = null
+    console.log('🎯 3D 팝업 제거')
+  }
+}
+
+// 객체로 카메라 이동
+const focusOnObject = (objectData: any) => {
+  if (objectData.position) {
+    const targetPosition = new THREE.Vector3(
+      objectData.position.x,
+      objectData.position.y + 5, // 객체 위 5유닛
+      objectData.position.z
+    )
+    
+    camera.position.copy(targetPosition)
+    controls.target.set(
+      objectData.position.x,
+      objectData.position.y,
+      objectData.position.z
+    )
+    controls.update()
+    
+    remove3DPopup()
+  }
+}
+
+// 캔버스 클릭 이벤트 처리
+const handleCanvasClick = (event: MouseEvent) => {
+  if (!canvas3d.value || !camera || !scene) return
+  
+  const rect = canvas3d.value.getBoundingClientRect()
+  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
+  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
+  
+  raycaster.setFromCamera(mouse, camera)
+  
+  // 3D 팝업 클릭 검사 (우선순위)
+  if (current3DPopup) {
+    // 팝업 배경 클릭 검사 (팝업 닫기)
+    const popupBackground = current3DPopup.children.find(child => child.type === 'Mesh' && !child.userData.action)
+    if (popupBackground) {
+      const backgroundIntersects = raycaster.intersectObject(popupBackground, false)
+      if (backgroundIntersects.length > 0) {
+        remove3DPopup()
+        return
+      }
+    }
+    
+    // 팝업 내부 클릭 시에도 닫기 (버튼이 제거되었으므로)
+    const popupIntersects = raycaster.intersectObject(current3DPopup, true)
+    if (popupIntersects.length > 0) {
+      remove3DPopup()
+      return
+    }
+  }
+  
+  // 상태 표시 구체 클릭 검사
+  const statusSpheres = scene.children.filter(child => child.userData.type === 'status-sphere')
+  const intersects = raycaster.intersectObjects(statusSpheres, false)
+  
+  if (intersects.length > 0) {
+    const clickedSphere = intersects[0].object
+    const parentObjectId = clickedSphere.userData.parentObjectId
+    
+    // 부모 객체 정보 찾기
+    const parentObject = scene.children.find(child =>
+      child.userData.type === 'placed-object' &&
+      child.userData.placedObjectId === parentObjectId
+    )
+    
+    if (parentObject) {
+      // Store에서 원본 데이터 찾기
+      const originalData = floorplanStore.placedObjects.find(obj => obj.id === parentObjectId)
+      
+      if (originalData) {
+        const objectData = {
+          objectName: originalData.name,
+          category: originalData.category,
+          width: originalData.width,
+          depth: originalData.depth,
+          height: originalData.height,
+          position: {
+            x: originalData.position.x,
+            y: originalData.position.y
+          },
+          rotation: originalData.rotation || 0
+        }
+        
+        // 3D 팝업 생성 - 클릭된 구체의 실제 위치 사용
+        const spherePosition = clickedSphere.position.clone()
+        create3DPopup(objectData, spherePosition)
+      }
+    }
+  } else {
+    // 아무것도 클릭되지 않았고 팝업이 열려있다면 팝업 닫기
+    if (current3DPopup) {
+      remove3DPopup()
     }
   }
 }
@@ -755,6 +1245,9 @@ const create3DBox = (placedObj: any, color: string) => {
   }
   
   scene.add(boxGroup)
+  
+  // 상자에도 상태 표시 구체 추가
+  addStatusSphere(boxGroup, placedObj)
 }
 
 // 상자 위 오브젝트 배치 처리
@@ -918,10 +1411,13 @@ const addEnhancedLighting = (centerX: number, centerZ: number, width: number, de
 // Clear All 3D - 모든 3D 객체 제거
 const clearAll3D = () => {
   if (!scene) return
+  
+  // 3D 팝업 제거
+  remove3DPopup()
 
   const objectTypesToRemove = [
     'exterior-wall', 'interior-wall', 'room-floor', 'ceiling', 
-    'room-light', 'corner-light', 'wall-decoration', 'placed-object'
+    'room-light', 'corner-light', 'wall-decoration', 'placed-object', 'status-sphere', '3d-popup'
   ]
   
   const objectsToRemove: THREE.Object3D[] = []
@@ -1017,6 +1513,14 @@ onUnmounted(() => {
     cancelAnimationFrame(animationId)
   }
   window.removeEventListener('resize', handleResize)
+  
+  // 클릭 이벤트 리스너 제거
+  if (canvas3d.value) {
+    canvas3d.value.removeEventListener('click', handleCanvasClick)
+  }
+  
+  // 3D 팝업 제거
+  remove3DPopup()
   
   // Three.js LOD는 자동으로 처리되므로 타임아웃 정리 불필요
   
@@ -1154,5 +1658,10 @@ defineExpose({
 .lod-status {
   color: #e67e22;
   font-weight: 600;
+}
+
+.lod-disabled {
+  color: #95a5a6;
+  font-weight: 400;
 }
 </style> 
