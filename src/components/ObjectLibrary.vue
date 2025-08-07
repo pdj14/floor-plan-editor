@@ -400,7 +400,8 @@ const defaultObjects: GameObject[] = [
     size: '2.0m ×1.0m × 2.0m',
     width: 2.0,
     depth: 1.0,
-    height: 2.0
+    height: 2.0,
+    instancing: true // RACK1은 인스턴싱 적용
   },
 
 

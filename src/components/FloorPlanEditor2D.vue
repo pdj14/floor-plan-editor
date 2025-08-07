@@ -1477,7 +1477,8 @@ const handlePlaceObject = (event: any) => {
     color: object.color, // GLB에서 추출한 색상 (있다면)
     isOnBox: boxPlacementMode.value && selectedBox.value && object.category !== 'etc', // 상자 위 배치 여부
     boxId: boxPlacementMode.value && selectedBox.value ? selectedBox.value.userData?.placedObjectId : null, // 상자 ID
-    isBox: object.isBox || false // 상자 여부
+    isBox: object.isBox || false, // 상자 여부
+    instancing: object.instancing || false // 인스턴싱 값 추가
   }
   
   console.log('📦 Store에 오브젝트 추가 중:', placedObjectData)

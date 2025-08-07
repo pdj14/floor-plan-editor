@@ -46,6 +46,7 @@ interface PlacedObject {
   isOnBox?: boolean // 상자 위 배치 여부
   boxId?: string    // 상자 ID (상자 위에 배치된 경우)
   isBox?: boolean   // 상자 여부
+  instancing?: boolean // 인스턴싱 활성화 여부
 }
 
 // Floorplan Store
@@ -159,6 +160,14 @@ export const useFloorplanStore = defineStore('floorplan', () => {
   const clearPlacedObjects = () => {
     placedObjects.value = []
   }
+
+  // 모든 배치된 오브젝트의 인스턴싱 값 업데이트
+  const updateAllPlacedObjectsInstancing = (enabled: boolean) => {
+    placedObjects.value.forEach(obj => {
+      obj.instancing = enabled
+    })
+    console.log(`🎯 모든 배치된 오브젝트 인스턴싱 ${enabled ? '활성화' : '비활성화'}`)
+  }
   
   const logCurrentState = () => {
     // 디버깅용 함수 (빈 함수로 유지)
@@ -193,6 +202,7 @@ export const useFloorplanStore = defineStore('floorplan', () => {
     updatePlacedObject,
     removePlacedObject,
     clearPlacedObjects,
+    updateAllPlacedObjectsInstancing, // 인스턴싱 업데이트 함수 추가
     logCurrentState
   }
 }) 
