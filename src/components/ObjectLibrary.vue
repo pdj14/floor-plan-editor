@@ -299,6 +299,7 @@ interface GameObject {
   color?: string  // 색상 (상자용)
   isBox?: boolean // 상자 여부
   lodUrl?: string // LOD용 GLB 파일 URL
+  instancing?: boolean // 인스턴싱 활성화 여부
 }
 
 interface NewObject {
@@ -361,7 +362,8 @@ const defaultObjects: GameObject[] = [
     size: '0.8m × 0.8m × 0.8m',
     width: 0.8,
     depth: 0.8,
-    height: 0.8
+    height: 0.8,
+    instancing: false
   },
   {
     id: 'default-robot2',
@@ -373,7 +375,8 @@ const defaultObjects: GameObject[] = [
     size: '1.0m × 1.0m × 1.5m',
     width: 1.0,
     depth: 1.0,
-    height: 1.5
+    height: 1.5,
+    instancing: false
   },
   {
     id: 'default-robot-cage',
@@ -386,7 +389,8 @@ const defaultObjects: GameObject[] = [
     size: '2.0m × 1.2m × 2.0m',
     width: 2.0,
     depth: 1.2,
-    height: 2.0
+    height: 2.0,
+    instancing: false
   },
 
   {
@@ -415,7 +419,8 @@ const defaultObjects: GameObject[] = [
     size: '1.45m × 0.84m × 0.08m',
     width: 1.45,  // 가로 (화면 너비)
     depth: 0.08,  // 세로 (두께) - TV는 얇음
-    height: 0.84  // 높이 (화면 높이) - TV는 세로가 더 큼
+    height: 0.84,  // 높이 (화면 높이) - TV는 세로가 더 큼
+    instancing: false
   },
 
   {
@@ -428,7 +433,8 @@ const defaultObjects: GameObject[] = [
     size: '0.6m × 0.6m × 0.85m',
     width: 0.6,   // 가로
     depth: 0.6,   // 세로
-    height: 0.85  // 높이
+    height: 0.85,  // 높이
+    instancing: false
   },
   {
     id: 'default-family-hub',
@@ -440,7 +446,8 @@ const defaultObjects: GameObject[] = [
     size: '1.2m × 1.0m × 2.2m',
     width: 1.2,   // 가로
     depth: 1.0,   // 세로
-    height: 2.2   // 높이
+    height: 2.2,   // 높이
+    instancing: false
   },
   {
     id: 'default-refrigerator',
@@ -452,7 +459,8 @@ const defaultObjects: GameObject[] = [
     size: '1.2m × 1.0m × 2.0m',
     width: 1.2,
     depth: 1.0,
-    height: 2.0
+    height: 2.0,
+    instancing: false
   },
   {
     id: 'default-box',
@@ -466,7 +474,8 @@ const defaultObjects: GameObject[] = [
     depth: 1.0,
     height: 1.0,
     color: '#D2B48C',
-    isBox: true
+    isBox: true,
+    instancing: false
   }
 ]
 
