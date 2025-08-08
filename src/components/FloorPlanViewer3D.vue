@@ -558,7 +558,8 @@ const updatePlacedObjectsIn3D = async (placedObjects: any[]) => {
 // 인스턴싱용 큐브 지오메트리와 머티리얼 (전역 변수)
 let instancedCubeGeometry: THREE.BoxGeometry | null = null
 let instancedCubeMaterial: THREE.MeshStandardMaterial | null = null
-let instancedMesh: THREE.InstancedMesh | null = null
+// 여러 모델을 각각의 InstancedMesh로 관리
+let instancedMeshes: THREE.InstancedMesh[] = []
 
 // 3D 오브젝트 생성 (GLB 모델 로딩) - Three.js 내장 LOD 사용
 const create3DObjects = async (placedObjects: any[]) => {
@@ -588,6 +589,18 @@ const create3DObjects = async (placedObjects: any[]) => {
       })
     }
   })
+
+  // 이전 인스턴싱 메쉬가 남아있는 경우 정리 (인스턴싱 오브젝트가 0개가 되는 경우 대비)
+  if (instancedMeshes.length > 0) {
+    instancedMeshes.forEach(mesh => {
+      scene.remove(mesh)
+      mesh.geometry.dispose()
+      if (mesh.material && 'dispose' in mesh.material) {
+        mesh.material.dispose()
+      }
+    })
+    instancedMeshes = []
+  }
 
   // 인스턴싱이 활성화된 오브젝트들 분리 (상자가 아닌 것들만)
   const instancedObjects = placedObjects.filter(obj => obj.instancing && !obj.isBox)
@@ -807,7 +820,10 @@ const addStatusSphere = (object: THREE.Object3D, placedObj: any) => {
   const size = box.getSize(new THREE.Vector3())
   
   // 구체 크기 계산 (객체 크기의 15%로 설정, 최소 0.1, 최대 0.3)
-  const sphereRadius = Math.max(0.1, Math.min(0.3, Math.max(size.x, size.y, size.z) * 0.15))
+  // 더미 그룹(지오메트리 없음)일 경우 placedObj의 크기를 사용
+  const hasGeometryBounds = size.x > 0 || size.y > 0 || size.z > 0
+  const refWidth = hasGeometryBounds ? Math.max(size.x, size.y, size.z) : Math.max(placedObj.width || 1, placedObj.height || 1, placedObj.depth || 1)
+  const sphereRadius = Math.max(0.1, Math.min(0.3, refWidth * 0.15))
   
   // 구체 지오메트리와 머티리얼 생성
   const sphereGeometry = new THREE.SphereGeometry(sphereRadius, 16, 16)
@@ -822,7 +838,8 @@ const addStatusSphere = (object: THREE.Object3D, placedObj: any) => {
   const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial)
   
   // 구체 위치 설정 (객체 상단 중앙)
-  const objectTop = box.max.y
+  // 더미 그룹인 경우 바운딩이 0이므로 높이 절반을 더해 상단을 추정
+  const objectTop = hasGeometryBounds ? box.max.y : (object.position.y + (placedObj.height || 0) / 2)
   sphere.position.set(
     object.position.x,
     objectTop + sphereRadius * 1.2, // 객체 위에 약간의 간격을 두고 배치
@@ -1168,34 +1185,32 @@ const handleCanvasClick = (event: MouseEvent) => {
     const clickedSphere = intersects[0].object
     const parentObjectId = clickedSphere.userData.parentObjectId
     
-    // 부모 객체 정보 찾기
+    // 부모 객체 정보 찾기 (일반 GLB 경로)
     const parentObject = scene.children.find(child =>
       child.userData.type === 'placed-object' &&
       child.userData.placedObjectId === parentObjectId
     )
     
-    if (parentObject) {
-      // Store에서 원본 데이터 찾기
-      const originalData = floorplanStore.placedObjects.find(obj => obj.id === parentObjectId)
-      
-      if (originalData) {
-        const objectData = {
-          objectName: originalData.name,
-          category: originalData.category,
-          width: originalData.width,
-          depth: originalData.depth,
-          height: originalData.height,
-          position: {
-            x: originalData.position.x,
-            y: originalData.position.y
-          },
-          rotation: originalData.rotation || 0
-        }
-        
-        // 3D 팝업 생성 - 클릭된 구체의 실제 위치 사용
-        const spherePosition = clickedSphere.position.clone()
-        create3DPopup(objectData, spherePosition)
+    // Store에서 원본 데이터 찾기 (인스턴싱 경로 포함)
+    const originalData = floorplanStore.placedObjects.find(obj => obj.id === parentObjectId)
+    
+    if (originalData) {
+      const objectData = {
+        objectName: originalData.name,
+        category: originalData.category,
+        width: originalData.width,
+        depth: originalData.depth,
+        height: originalData.height,
+        position: {
+          x: originalData.position.x,
+          y: originalData.position.y
+        },
+        rotation: originalData.rotation || 0
       }
+      
+      // 3D 팝업 생성 - 클릭된 구체의 실제 위치 사용
+      const spherePosition = clickedSphere.position.clone()
+      create3DPopup(objectData, spherePosition)
     }
   } else {
     // 아무것도 클릭되지 않았고 팝업이 열려있다면 팝업 닫기
@@ -1240,128 +1255,99 @@ const create3DBox = (placedObj: any, color: string) => {
 }
 
 // GLB 파일을 사용한 인스턴싱 오브젝트들 생성 (InstancedMesh 사용)
+// 같은 glbUrl(+lodUrl) 별로 묶어서 각각의 InstancedMesh를 생성
 const createInstancedObjectsFromGLB = async (instancedObjects: any[]) => {
   console.log(`🎯 GLB 기반 인스턴싱 오브젝트 ${instancedObjects.length}개 생성`)
   
-  // 기존 인스턴스 메시 정리
-  if (instancedMesh) {
-    scene.remove(instancedMesh)
-    instancedMesh.geometry.dispose()
-    if (instancedMesh.material && 'dispose' in instancedMesh.material) {
-      instancedMesh.material.dispose()
-    }
-    instancedMesh = null
-  }
-  
   if (instancedObjects.length === 0) return
   
-  // 첫 번째 오브젝트의 GLB 파일을 로드하여 지오메트리와 머티리얼 추출
-  const firstObject = instancedObjects[0]
+  // glbUrl(+lodUrl) 키로 그룹핑
+  const groups = new Map<string, any[]>()
+  instancedObjects.forEach(obj => {
+    const key = `${(lodEnabled.value && obj.lodUrl) ? obj.lodUrl : obj.glbUrl}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(obj)
+  })
+
   const loader = new GLTFLoader()
-  
-  try {
-    const gltf = await new Promise<any>((resolve, reject) => {
-      loader.load(
-        firstObject.glbUrl,
-        resolve,
-        undefined,
-        reject
+  for (const [key, group] of groups.entries()) {
+    try {
+      const gltf = await new Promise<any>((resolve, reject) => {
+        loader.load(key, resolve, undefined, reject)
+      })
+
+      gltf.scene.updateMatrixWorld(true)
+      const sourceMesh = gltf.scene.children.find((child: THREE.Object3D) => child.type === 'Mesh') as THREE.Mesh
+      if (!sourceMesh) {
+        console.error('❌ GLB에서 메시를 찾을 수 없음:', key)
+        continue
+      }
+      const baseQuaternion = new THREE.Quaternion()
+      sourceMesh.getWorldQuaternion(baseQuaternion)
+
+      // 지오메트리와 머티리얼 복제 (인스턴싱용)
+      const instancedGeometry = sourceMesh.geometry.clone()
+      const instancedMaterial = Array.isArray(sourceMesh.material)
+        ? sourceMesh.material[0].clone()
+        : (sourceMesh.material as THREE.Material).clone()
+
+      const mesh = new THREE.InstancedMesh(
+        instancedGeometry,
+        instancedMaterial,
+        group.length
       )
-    })
-    
-    // GLB에서 첫 번째 메시의 지오메트리와 머티리얼 추출
-    const sourceMesh = gltf.scene.children.find((child: THREE.Object3D) => child.type === 'Mesh') as THREE.Mesh
-    if (!sourceMesh) {
-      console.error('❌ GLB에서 메시를 찾을 수 없음')
-      return
-    }
-    
-    // 지오메트리와 머티리얼 복제 (인스턴싱용)
-    const instancedGeometry = sourceMesh.geometry.clone()
-    const instancedMaterial = Array.isArray(sourceMesh.material) 
-      ? sourceMesh.material[0].clone() 
-      : sourceMesh.material.clone()
-    
-    // InstancedMesh 생성
-    instancedMesh = new THREE.InstancedMesh(
-      instancedGeometry,
-      instancedMaterial,
-      instancedObjects.length
-    )
-    
-    // 각 오브젝트의 변환 행렬 설정
-    instancedObjects.forEach((obj, index) => {
-      const matrix = new THREE.Matrix4()
-      
-      // 위치 설정
-      const position = new THREE.Vector3(
-        obj.position.x,
-        obj.height / 2, // 바닥에서 높이의 절반만큼 올림
-        obj.position.y
-      )
-      
-      // 회전 설정
-      const rotation = new THREE.Euler(0, obj.rotation || 0, 0)
-      
-      // GLB 모델의 원본 바운딩 박스 계산
+
+      // GLB 모델의 원본 바운딩 박스 계산 (스케일 계산 공통)
       const boundingBox = new THREE.Box3().setFromObject(gltf.scene)
       const originalSize = {
         width: boundingBox.max.x - boundingBox.min.x,
         height: boundingBox.max.y - boundingBox.min.y,
         depth: boundingBox.max.z - boundingBox.min.z
       }
-      
-      // 목표 크기와 원본 크기의 비율로 스케일 계산
-      const scaleX = (obj.width || 1) / (originalSize.width || 1)
-      const scaleY = (obj.height || 1) / (originalSize.height || 1)
-      const scaleZ = (obj.depth || 1) / (originalSize.depth || 1)
-      
-      const scale = new THREE.Vector3(scaleX, scaleY, scaleZ)
-      
-      // 변환 행렬 구성
-      matrix.compose(position, new THREE.Quaternion().setFromEuler(rotation), scale)
-      
-      // 인스턴스에 변환 행렬 적용
-      if (instancedMesh) {
-        instancedMesh.setMatrixAt(index, matrix)
-      }
-    })
-    
-    // InstancedMesh를 씬에 추가
-    if (instancedMesh) {
-      instancedMesh.userData = {
+
+      group.forEach((obj, index) => {
+        const matrix = new THREE.Matrix4()
+        const position = new THREE.Vector3(obj.position.x, obj.height / 2, obj.position.y)
+        const rotation = new THREE.Euler(0, -(obj.rotation || 0), 0)
+        const instanceQuaternion = new THREE.Quaternion().setFromEuler(rotation)
+        const finalQuaternion = baseQuaternion.clone().multiply(instanceQuaternion)
+        const scale = new THREE.Vector3(
+          (obj.width || 1) / (originalSize.width || 1),
+          (obj.height || 1) / (originalSize.height || 1),
+          (obj.depth || 1) / (originalSize.depth || 1)
+        )
+        matrix.compose(position, finalQuaternion, scale)
+        mesh.setMatrixAt(index, matrix)
+      })
+
+      mesh.userData = {
         type: 'instanced-objects',
-        count: instancedObjects.length,
-        objects: instancedObjects.map(obj => ({
-          id: obj.id,
-          name: obj.name,
-          category: obj.category
-        }))
+        count: group.length
       }
-      
-      scene.add(instancedMesh)
+      scene.add(mesh)
+      instancedMeshes.push(mesh)
+
+      // 상태 구체 추가 (더미 그룹으로 위치/높이 계산)
+      group.forEach(obj => {
+        const dummyGroup = new THREE.Group()
+        dummyGroup.position.set(obj.position.x, obj.height / 2, obj.position.y)
+        dummyGroup.userData = {
+          type: 'placed-object',
+          placedObjectId: obj.id,
+          objectName: obj.name,
+          category: obj.category,
+          height: obj.height,
+          isInstanced: true
+        }
+        scene.add(dummyGroup)
+        addStatusSphere(dummyGroup, obj)
+        scene.remove(dummyGroup)
+      })
+
+    } catch (e) {
+      console.error('❌ GLB 로딩 실패(그룹):', key, e)
+      createInstancedObjects(group)
     }
-    
-    // 인스턴싱 오브젝트들에 대한 상태 표시 구체들 추가
-    instancedObjects.forEach(obj => {
-      const dummyGroup = new THREE.Group()
-      dummyGroup.position.set(obj.position.x, obj.height / 2, obj.position.y)
-      dummyGroup.userData = {
-        type: 'instanced-object-dummy',
-        placedObjectId: obj.id,
-        objectName: obj.name,
-        category: obj.category,
-        isInstanced: true
-      }
-      addStatusSphere(dummyGroup, obj)
-    })
-    
-    console.log(`✅ GLB 기반 인스턴싱 오브젝트 ${instancedObjects.length}개 생성 완료`)
-    
-  } catch (error) {
-    console.error('❌ GLB 로딩 실패:', error)
-    // GLB 로딩 실패 시 기존 큐브 방식으로 폴백
-    createInstancedObjects(instancedObjects)
   }
 }
 
@@ -1369,14 +1355,16 @@ const createInstancedObjectsFromGLB = async (instancedObjects: any[]) => {
 const createInstancedObjects = (instancedObjects: any[]) => {
   console.log(`🎯 큐브 기반 인스턴싱 오브젝트 ${instancedObjects.length}개 생성 (폴백)`)
   
-  // 기존 인스턴스 메시 정리
-  if (instancedMesh) {
-    scene.remove(instancedMesh)
-    instancedMesh.geometry.dispose()
-    if (instancedMesh.material && 'dispose' in instancedMesh.material) {
-      instancedMesh.material.dispose()
-    }
-    instancedMesh = null
+  // 기존 인스턴스 메시 정리 (폴백 전용 단일 메쉬)
+  if (instancedMeshes.length > 0) {
+    instancedMeshes.forEach(mesh => {
+      scene.remove(mesh)
+      mesh.geometry.dispose()
+      if (mesh.material && 'dispose' in mesh.material) {
+        mesh.material.dispose()
+      }
+    })
+    instancedMeshes = []
   }
   
   if (instancedObjects.length === 0) return
@@ -1395,7 +1383,7 @@ const createInstancedObjects = (instancedObjects: any[]) => {
   }
   
   // InstancedMesh 생성
-  instancedMesh = new THREE.InstancedMesh(
+  const mesh = new THREE.InstancedMesh(
     instancedCubeGeometry,
     instancedCubeMaterial,
     instancedObjects.length
@@ -1426,18 +1414,18 @@ const createInstancedObjects = (instancedObjects: any[]) => {
     matrix.compose(position, new THREE.Quaternion().setFromEuler(rotation), scale)
     
     // 인스턴스에 변환 행렬 적용
-    if (instancedMesh) {
-      instancedMesh.setMatrixAt(index, matrix)
+    if (mesh) {
+      mesh.setMatrixAt(index, matrix)
       
       // 각 인스턴스에 고유 색상 설정 (선택사항)
       const color = new THREE.Color('#FF6B6B')
-      instancedMesh.setColorAt(index, color)
+      mesh.setColorAt(index, color)
     }
   })
   
   // InstancedMesh를 씬에 추가
-  if (instancedMesh) {
-    instancedMesh.userData = {
+  if (mesh) {
+    mesh.userData = {
       type: 'instanced-objects',
       count: instancedObjects.length,
       objects: instancedObjects.map(obj => ({
@@ -1446,8 +1434,8 @@ const createInstancedObjects = (instancedObjects: any[]) => {
         category: obj.category
       }))
     }
-    
-    scene.add(instancedMesh)
+    scene.add(mesh)
+    instancedMeshes.push(mesh)
   }
   
   // 인스턴싱 오브젝트들에 대한 상태 표시 구체들 추가
@@ -1634,7 +1622,8 @@ const clearAll3D = () => {
 
   const objectTypesToRemove = [
     'exterior-wall', 'interior-wall', 'room-floor', 'ceiling', 
-    'room-light', 'corner-light', 'wall-decoration', 'placed-object', 'status-sphere', '3d-popup'
+    'room-light', 'corner-light', 'wall-decoration', 'placed-object', 'status-sphere', '3d-popup',
+    'instanced-objects'
   ]
   
   const objectsToRemove: THREE.Object3D[] = []
@@ -1661,6 +1650,17 @@ const clearAll3D = () => {
       }
     }
   })
+
+  // 인스턴싱 메쉬 전역 캐시 정리
+  if (instancedMeshes.length > 0) {
+    instancedMeshes.forEach(mesh => {
+      mesh.geometry.dispose()
+      if (mesh.material && 'dispose' in mesh.material) {
+        mesh.material.dispose()
+      }
+    })
+    instancedMeshes = []
+  }
   
   objects.value = objects.value.filter(obj => !objectsToRemove.includes(obj))
   
