@@ -27,11 +27,18 @@
               placeholder="세로"
             />
           </div>
-          <select v-model="selectedFloorColor" class="color-select">
-            <option v-for="c in floorColors" :key="c.value" :value="c.value">
-              {{ c.label }}
-            </option>
-          </select>
+          <div class="color-swatches">
+            <button 
+              v-for="c in floorColors" 
+              :key="c.hex" 
+              type="button"
+              class="swatch"
+              :class="{ selected: selectedFloorColor.hex === c.hex }"
+              :style="{ backgroundColor: c.hex }"
+              @click="selectedFloorColor = c"
+              :title="c.label"
+            />
+          </div>
           <button @click="createRoom" class="btn btn-primary" :disabled="!isValidSize">
             🏗️ Create Room
           </button>
@@ -144,13 +151,13 @@ let fabricCanvas: any = null
 const roomWidth = ref(10)  // 기본 가로 10m
 const roomHeight = ref(10) // 기본 세로 10m
 const floorColors = ref([
-  { label: 'Pastel Yellow', value: 'rgba(255, 243, 176, 0.6)' },
-  { label: 'Pastel Mint', value: 'rgba(178, 235, 242, 0.6)' },
-  { label: 'Pastel Green', value: 'rgba(200, 230, 201, 0.6)' },
-  { label: 'Pastel Pink', value: 'rgba(255, 204, 213, 0.6)' },
-  { label: 'Pastel Blue', value: 'rgba(187, 222, 251, 0.6)' }
+  { label: 'Pastel Yellow', hex: '#FFE082', rgba: 'rgba(255, 224, 130, 0.65)' },
+  { label: 'Pastel Mint',   hex: '#80DEEA', rgba: 'rgba(128, 222, 234, 0.65)' },
+  { label: 'Pastel Green',  hex: '#A5D6A7', rgba: 'rgba(165, 214, 167, 0.65)' },
+  { label: 'Pastel Pink',   hex: '#F8BBD0', rgba: 'rgba(248, 187, 208, 0.65)' },
+  { label: 'Pastel Blue',   hex: '#90CAF9', rgba: 'rgba(144, 202, 249, 0.65)' }
 ])
-const selectedFloorColor = ref('rgba(255, 243, 176, 0.6)')
+const selectedFloorColor = ref<{label: string; hex: string; rgba: string}>(floorColors.value[0])
 const currentTool = ref('select')
 const mousePosition = ref({ x: 0, y: 0 })
 const selectedObject = ref<any>(null)
@@ -494,6 +501,11 @@ const setupWallDrawing = () => {
       }
       return
     }
+    // 바닥 선택 허용
+    if (selected && selected.userData?.type === 'room-floor') {
+      selectedObject.value = selected
+      return
+    }
     
     // 벽은 select 모드에서만 선택 가능
     if (currentTool.value !== 'select') {
@@ -516,6 +528,11 @@ const setupWallDrawing = () => {
     
     // placed-object는 두 모드에서 모두 선택 가능
     if (selected && selected.userData?.type === 'placed-object') {
+      selectedObject.value = selected
+      return
+    }
+    // 바닥 선택 허용
+    if (selected && selected.userData?.type === 'room-floor') {
       selectedObject.value = selected
       return
     }
@@ -883,7 +900,7 @@ const createRoom = () => {
     top: startY,
     width: roomWidthPx,
     height: roomHeightPx,
-    fill: selectedFloorColor.value,
+    fill: selectedFloorColor.value.rgba,
     stroke: '#E5D38A', // 테두리는 살짝 어둡게
     strokeWidth: 1,
     selectable: true,
@@ -897,9 +914,13 @@ const createRoom = () => {
   // 바닥 사이즈 라벨 추가
   addOrUpdateRoomSizeLabel(floorRect)
 
-  // 바닥 이동/리사이즈 처리: 스토어 바닥 정보와 라벨만 업데이트 (오브젝트는 불변)
-  floorRect.on('moving', () => handleFloorModified(floorRect))
+  // 바닥 이동/리사이즈 처리 분리 (이동 시 크기 변경 금지)
+  floorRect.on('moving', () => handleFloorMoving(floorRect))
   floorRect.on('modified', () => handleFloorModified(floorRect))
+
+  // 선택/해제 시 UI 연동 (Delete 버튼 활성화)
+  floorRect.on('selected', () => { selectedObject.value = floorRect })
+  floorRect.on('deselected', () => { if (selectedObject.value === floorRect) selectedObject.value = null })
   // 바닥 클릭 시에도 즉시 레이어 정렬 유지
   floorRect.on('mousedown', () => {
     sendAllFloorsToBack()
@@ -930,7 +951,7 @@ const createRoom = () => {
     width: roomWidth.value,
     height: roomHeight.value,
     boundsPx: { left: startX, top: startY, right: startX + roomWidthPx, bottom: startY + roomHeightPx },
-    color: selectedFloorColor.value
+    color: selectedFloorColor.value.hex
   })
 
   // 외부벽 데이터는 생성하지 않음 (요청사항)
@@ -947,8 +968,9 @@ const addOrUpdateRoomSizeLabel = (floorRect: any) => {
   const area = Math.round(widthM * heightM * 100) / 100
   const labelText = `W ${widthM.toFixed(2)}m × D ${heightM.toFixed(2)}m  |  Area ${area.toFixed(2)} m²`
 
-  // 기존 라벨 찾기
-  const existing = fabricCanvas.getObjects().find((o: any) => o.userData?.type === 'room-size-label') as any
+  // 기존 라벨 찾기 (floor별)
+  const floorId = floorRect.userData?.floorId
+  const existing = fabricCanvas.getObjects().find((o: any) => o.userData?.type === 'room-size-label' && o.userData?.floorId === floorId) as any
   if (existing) {
     existing.text = labelText
     existing.left = floorRect.left + 8
@@ -962,7 +984,7 @@ const addOrUpdateRoomSizeLabel = (floorRect: any) => {
       fill: '#5c5c5c',
       backgroundColor: 'rgba(255,255,255,0.6)'
     }) as any
-    label.userData = { type: 'room-size-label' }
+    label.userData = { type: 'room-size-label', floorId }
     fabricCanvas.add(label)
     label.bringToFront()
   }
@@ -1003,6 +1025,33 @@ const handleFloorModified = (floorRect: any) => {
   // 다른 요소에는 영향 없음. 2D 재구성 불필요
 
   fabricCanvas.renderAll()
+}
+
+// 바닥 이동 중에는 크기를 고정하고, 위치만 반영
+const handleFloorMoving = (floorRect: any) => {
+  if (!fabricCanvas) return
+  const scale = 40
+  // 크기 스케일 잠금
+  if (floorRect.scaleX !== 1 || floorRect.scaleY !== 1) {
+    const w = floorRect.getScaledWidth()
+    const h = floorRect.getScaledHeight()
+    floorRect.set({ width: w, height: h, scaleX: 1, scaleY: 1 })
+  }
+  // 위치만 floors 스토어에 반영
+  const floorId = floorRect.userData?.floorId as string
+  if (!floorId) return
+  const newBounds = {
+    left: floorRect.left,
+    top: floorRect.top,
+    right: floorRect.left + floorRect.width,
+    bottom: floorRect.top + floorRect.height
+  }
+  floorplanStore.updateFloor(floorId, { boundsPx: newBounds })
+  // 라벨도 함께 이동
+  addOrUpdateRoomSizeLabel(floorRect)
+  // 레이어 정렬 유지
+  sendAllFloorsToBack()
+  positionGridAfterFloors()
 }
 
 // 실시간 3D 업데이트 제거로 인해 updateAllWalls 함수 비활성화
@@ -1714,6 +1763,29 @@ const deleteSelectedObject = () => {
         floorplanStore.removeExteriorWall(objectId)
       }
     }
+  } else if (objectType === 'room-floor') {
+    // 바닥 삭제: 같은 floorId의 라벨/사각형 모두 제거, 스토어 업데이트, 강제 리프레시 및 레이어 재정렬
+    const floorId = objectToDelete.userData?.floorId
+    if (floorId) {
+      // 라벨 제거
+      const sizeLabels = fabricCanvas.getObjects().filter((obj: any) => obj.userData?.type === 'room-size-label' && obj.userData?.floorId === floorId)
+      sizeLabels.forEach((lbl: any) => fabricCanvas.remove(lbl))
+      // 사각형(바닥) 중 동일 floorId가 남아있다면 모두 제거
+      const sameFloorRects = fabricCanvas.getObjects().filter((obj: any) => obj.userData?.type === 'room-floor' && obj.userData?.floorId === floorId)
+      sameFloorRects.forEach((rect: any) => fabricCanvas.remove(rect))
+      // Store에서 제거
+      floorplanStore.removeFloor(floorId)
+    } else {
+      // floorId가 없는 경우도 안전하게 제거
+      fabricCanvas.remove(objectToDelete)
+    }
+    // 레이어 재정렬 및 강제 리렌더
+    sendAllFloorsToBack()
+    positionGridAfterFloors()
+    fabricCanvas.discardActiveObject()
+    selectedObject.value = null
+    fabricCanvas.requestRenderAll()
+    fabricCanvas.renderAll()
   }
 
   // 선택 해제
@@ -1855,6 +1927,24 @@ onUnmounted(() => {
   border-bottom: 1px solid #ddd;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
   gap: 2rem;
+}
+
+.color-swatches {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+  cursor: pointer;
+}
+
+.swatch.selected {
+  outline: 2px solid #333;
 }
 
 .room-controls {

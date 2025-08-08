@@ -309,17 +309,18 @@ const create3DFloorFromRoom = (data: any) => {
   })
 
   // 여러 바닥 지원: floors 기준으로만 렌더 (2D px → 3D m)
-  if (Array.isArray(data.floors) && data.floors.length > 0) {
+  // floors가 있으면 floors만 기준으로 동기화
+  if (Array.isArray(data.floors)) {
     data.floors.forEach((f: any) => {
       const widthMeters = f.width
       const depthMeters = f.height
       const geo = new THREE.PlaneGeometry(widthMeters, depthMeters)
       const mat = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(f.color || '#FFF3B0'),
+        color: new THREE.Color(f.color || '#FFE082'),
         roughness: 0.9,
         metalness: 0.0,
         transparent: true,
-        opacity: 0.6
+        opacity: 0.65
       })
       const mesh = new THREE.Mesh(geo, mat)
       mesh.rotation.x = -Math.PI / 2
