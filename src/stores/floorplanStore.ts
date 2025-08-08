@@ -24,6 +24,19 @@ interface Room {
   }
 }
 
+interface FloorArea {
+  id: string
+  width: number // meters
+  height: number // meters
+  boundsPx: {
+    left: number
+    top: number
+    right: number
+    bottom: number
+  }
+  color: string // hex like #FFF3B0
+}
+
 interface CanvasSize {
   width: number
   height: number
@@ -57,6 +70,7 @@ export const useFloorplanStore = defineStore('floorplan', () => {
   const exteriorWalls = ref<Wall[]>([]) // 외부벽도 직접 저장
   const placedObjects = ref<PlacedObject[]>([]) // 배치된 오브젝트들
   const canvasSize = ref<CanvasSize>({ width: 800, height: 600 })
+  const floors = ref<FloorArea[]>([])
   
   // Getters (computed)
   const hasRoom = computed(() => currentRoom.value !== null)
@@ -78,6 +92,7 @@ export const useFloorplanStore = defineStore('floorplan', () => {
     exteriorWalls: exteriorWalls.value, // 이제 ref로 직접 접근
     interiorWalls: interiorWalls.value,
     placedObjects: placedObjects.value, // 배치된 오브젝트 정보 추가
+    floors: floors.value,
     roomSize: currentRoom.value ? {
       width: currentRoom.value.width,
       height: currentRoom.value.height,
@@ -97,6 +112,7 @@ export const useFloorplanStore = defineStore('floorplan', () => {
     interiorWalls.value = []
     exteriorWalls.value = []
     placedObjects.value = []
+    floors.value = []
   }
   
   const setCanvasSize = (size: CanvasSize) => {
@@ -161,6 +177,26 @@ export const useFloorplanStore = defineStore('floorplan', () => {
     placedObjects.value = []
   }
 
+  // Floors actions
+  const addFloor = (floor: FloorArea) => {
+    floors.value.push(floor)
+  }
+
+  const updateFloor = (id: string, updated: Partial<FloorArea>) => {
+    const idx = floors.value.findIndex(f => f.id === id)
+    if (idx > -1) {
+      floors.value[idx] = { ...floors.value[idx], ...updated }
+    }
+  }
+
+  const removeFloor = (id: string) => {
+    floors.value = floors.value.filter(f => f.id !== id)
+  }
+
+  const clearFloors = () => {
+    floors.value = []
+  }
+
   // 모든 배치된 오브젝트의 인스턴싱 값 업데이트
   const updateAllPlacedObjectsInstancing = (enabled: boolean) => {
     placedObjects.value.forEach(obj => {
@@ -180,6 +216,7 @@ export const useFloorplanStore = defineStore('floorplan', () => {
     exteriorWalls, // 외부벽 추가
     placedObjects, // 배치된 오브젝트 추가
     canvasSize,
+    floors,
     
     // Getters
     hasRoom,
@@ -190,6 +227,10 @@ export const useFloorplanStore = defineStore('floorplan', () => {
     setRoom,
     clearRoom,
     setCanvasSize,
+    addFloor,
+    updateFloor,
+    removeFloor,
+    clearFloors,
     addInteriorWall,
     updateInteriorWall,
     removeInteriorWall,

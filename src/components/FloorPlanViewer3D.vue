@@ -292,6 +292,65 @@ const setupLights = () => {
   scene.add(fillLight)
 }
 
+// 3D 바닥 생성 (2D 룸 사이즈 기반)
+const create3DFloorFromRoom = (data: any) => {
+  if (!scene || !data?.roomSize || !data?.canvasSize) return
+
+  // 기존 바닥 제거
+  const existingFloors = scene.children.filter(child => child.userData.type === 'room-floor')
+  existingFloors.forEach(f => {
+    scene.remove(f)
+    if ((f as any).geometry) (f as any).geometry.dispose()
+    if ((f as any).material) {
+      const mat = (f as any).material
+      if (Array.isArray(mat)) mat.forEach(m => m.dispose())
+      else if ('dispose' in mat) mat.dispose()
+    }
+  })
+
+  // 여러 바닥 지원: floors 기준으로만 렌더 (2D px → 3D m)
+  if (Array.isArray(data.floors) && data.floors.length > 0) {
+    data.floors.forEach((f: any) => {
+      const widthMeters = f.width
+      const depthMeters = f.height
+      const geo = new THREE.PlaneGeometry(widthMeters, depthMeters)
+      const mat = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(f.color || '#FFF3B0'),
+        roughness: 0.9,
+        metalness: 0.0,
+        transparent: true,
+        opacity: 0.6
+      })
+      const mesh = new THREE.Mesh(geo, mat)
+      mesh.rotation.x = -Math.PI / 2
+      const cx = (f.boundsPx.left + f.boundsPx.right) / 2
+      const cy = (f.boundsPx.top + f.boundsPx.bottom) / 2
+      const posX = (cx - data.canvasSize.width / 2) / 40
+      const posZ = (cy - data.canvasSize.height / 2) / 40
+      mesh.position.set(posX, 0, posZ)
+      mesh.userData.type = 'room-floor'
+      scene.add(mesh)
+    })
+  } else if (data.roomSize) {
+    // floors가 아직 없는 경우 roomSize 기준으로 1개 표시 (호환)
+    const widthMeters = data.roomSize.width
+    const depthMeters = data.roomSize.height
+    const geo = new THREE.PlaneGeometry(widthMeters, depthMeters)
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0xFFF3B0,
+      roughness: 0.9,
+      metalness: 0.0,
+      transparent: true,
+      opacity: 0.6
+    })
+    const mesh = new THREE.Mesh(geo, mat)
+    mesh.rotation.x = -Math.PI / 2
+    mesh.position.set(0, 0, 0)
+    mesh.userData.type = 'room-floor'
+    scene.add(mesh)
+  }
+}
+
 // 2D 평면도에서 3D 벽 생성
 const create3DWalls = (wallsData: any) => {
   const existingWalls: any[] = []
@@ -1566,15 +1625,18 @@ const make3D = async () => {
       return
     }
 
-    if ((!data.exteriorWalls || data.exteriorWalls.length === 0) && 
-        (!data.interiorWalls || data.interiorWalls.length === 0)) {
+    // 바닥 생성 (2D에서 room-floor만 있는 케이스 지원)
+    if (data.roomSize) {
+      create3DFloorFromRoom(data)
+    }
 
-      return
+    // 벽이 있을 때만 3D 벽 생성
+    if ((data.exteriorWalls && data.exteriorWalls.length > 0) || 
+        (data.interiorWalls && data.interiorWalls.length > 0)) {
+      create3DWalls(data)
     }
 
 
-    create3DWalls(data)
-    
 
     await create3DObjects(data.placedObjects || [])
     

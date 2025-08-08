@@ -27,6 +27,11 @@
               placeholder="세로"
             />
           </div>
+          <select v-model="selectedFloorColor" class="color-select">
+            <option v-for="c in floorColors" :key="c.value" :value="c.value">
+              {{ c.label }}
+            </option>
+          </select>
           <button @click="createRoom" class="btn btn-primary" :disabled="!isValidSize">
             🏗️ Create Room
           </button>
@@ -138,6 +143,14 @@ let fabricCanvas: any = null
 
 const roomWidth = ref(10)  // 기본 가로 10m
 const roomHeight = ref(10) // 기본 세로 10m
+const floorColors = ref([
+  { label: 'Pastel Yellow', value: 'rgba(255, 243, 176, 0.6)' },
+  { label: 'Pastel Mint', value: 'rgba(178, 235, 242, 0.6)' },
+  { label: 'Pastel Green', value: 'rgba(200, 230, 201, 0.6)' },
+  { label: 'Pastel Pink', value: 'rgba(255, 204, 213, 0.6)' },
+  { label: 'Pastel Blue', value: 'rgba(187, 222, 251, 0.6)' }
+])
+const selectedFloorColor = ref('rgba(255, 243, 176, 0.6)')
 const currentTool = ref('select')
 const mousePosition = ref({ x: 0, y: 0 })
 const selectedObject = ref<any>(null)
@@ -403,6 +416,39 @@ const updateCanvasTransform = () => {
   updateGrid()
   
   fabricCanvas.renderAll()
+}
+
+// 모든 바닥을 가장 뒤 레이어로 보냄
+const sendAllFloorsToBack = () => {
+  if (!fabricCanvas) return
+  const floors = fabricCanvas.getObjects().filter((o: any) => o.userData?.type === 'room-floor')
+  floors.forEach((f: any) => {
+    // 항상 화면의 가장 뒤로
+    fabricCanvas.moveTo(f, 0)
+    f.selectable = true
+    f.evented = true
+  })
+}
+
+// 그리드를 모든 바닥 바로 위로 이동
+const positionGridAfterFloors = () => {
+  if (!fabricCanvas) return
+  const grid = fabricCanvas.getObjects().find((obj: any) => obj.type === 'group' && obj.getObjects?.().some((line: any) => line.type === 'line'))
+  if (!grid) return
+  const objs = fabricCanvas.getObjects()
+  const floorIndices = (objs
+    .map((o: any, idx: number) => ({ o, idx })) as Array<{ o: any; idx: number }>)
+    .filter((x: { o: any; idx: number }) => x.o.userData?.type === 'room-floor')
+    .map((x: { o: any; idx: number }) => x.idx)
+  const maxFloorIndex = floorIndices.length ? Math.max(...floorIndices) : -1
+  if (maxFloorIndex >= 0) {
+    fabricCanvas.moveTo(grid, maxFloorIndex + 1)
+  } else {
+    fabricCanvas.moveTo(grid, 0)
+  }
+  // 오브젝트는 항상 바닥/그리드 보다 앞쪽 (유지): 바닥/그리드 외의 요소를 앞으로
+  const others = objs.filter((o: any) => !(o.userData?.type === 'room-floor') && !(o === grid))
+  others.forEach((o: any, i: number) => fabricCanvas.moveTo(o, maxFloorIndex + 2 + i))
 }
 
 // 벽 그리기 이벤트 설정
@@ -681,7 +727,8 @@ const addGrid = () => {
   })
 
   fabricCanvas.add(grid)
-  fabricCanvas.sendToBack(grid)
+  // 레이어 정렬: 모든 바닥 뒤, 그 위에 그리드, 그 위에 오브젝트
+  positionGridAfterFloors()
 }
 
 // 확대/축소 및 이동에 따른 그리드 업데이트
@@ -762,7 +809,7 @@ const updateGrid = () => {
   })
   
   fabricCanvas.add(grid)
-  fabricCanvas.sendToBack(grid)
+  positionGridAfterFloors()
 }
 
 // Store를 사용한 내부 벽 추가
@@ -813,100 +860,58 @@ const addInteriorWall = (start: { x: number, y: number }, end: { x: number, y: n
 
 
 
-// Store를 사용한 네모난 방 생성
+// Store를 사용한 네모난 방 생성 (바닥만 생성, 벽 미생성)
 const createRoom = () => {
   if (!fabricCanvas || !isValidSize.value) return
 
-  // 기존 방 제거
-  clearCanvas()
+  // 기존 도면은 유지하고 바닥만 추가 (여러 바닥 지원)
 
-  const scale = 40 // 1m = 40px (0.5m = 20px)
-  const wallThickness = 2 // 벽 두께 (픽셀) - 사용자 요청으로 8 → 2로 수정
-  
+  const scale = 40 // 1m = 40px
   const roomWidthPx = roomWidth.value * scale
   const roomHeightPx = roomHeight.value * scale
-  
+
   // 캔버스 중앙에 배치
   const canvasWidth = fabricCanvas.width!
   const canvasHeight = fabricCanvas.height!
   const startX = (canvasWidth - roomWidthPx) / 2
   const startY = (canvasHeight - roomHeightPx) / 2
 
-  // 벽 생성 (4개의 선) - 내부벽과 동일한 방식
-  const walls = []
-
-  // 위쪽 벽 (좌 → 우)
-  const topWall = new fabric.Line([startX, startY, startX + roomWidthPx, startY], {
-    stroke: '#666666', // 더 진한 회색
-    strokeWidth: wallThickness,
+  // 바닥(직사각형) 생성 - 파스텔톤 노란색 (반투명)
+  const floorId = Date.now().toString()
+  const floorRect = new fabric.Rect({
+    left: startX,
+    top: startY,
+    width: roomWidthPx,
+    height: roomHeightPx,
+    fill: selectedFloorColor.value,
+    stroke: '#E5D38A', // 테두리는 살짝 어둡게
+    strokeWidth: 1,
     selectable: true,
-    evented: true,
-    opacity: 1,
-    hoverCursor: 'move',
-    moveCursor: 'move'
+    hasControls: true,
+    lockRotation: true,
+    evented: true
   })
-  topWall.userData = { 
-    type: 'exterior-wall',
-    id: 'exterior-top-' + Date.now(),
-    position: 'top'
-  }
-  walls.push(topWall)
+  ;(floorRect as any).userData = { type: 'room-floor', floorId }
+  fabricCanvas.add(floorRect)
 
-  // 아래쪽 벽 (좌 → 우)
-  const bottomWall = new fabric.Line([startX, startY + roomHeightPx, startX + roomWidthPx, startY + roomHeightPx], {
-    stroke: '#666666', // 더 진한 회색
-    strokeWidth: wallThickness,
-    selectable: true,
-    evented: true,
-    opacity: 1,
-    hoverCursor: 'move',
-    moveCursor: 'move'
+  // 바닥 사이즈 라벨 추가
+  addOrUpdateRoomSizeLabel(floorRect)
+
+  // 바닥 이동/리사이즈 처리: 스토어 바닥 정보와 라벨만 업데이트 (오브젝트는 불변)
+  floorRect.on('moving', () => handleFloorModified(floorRect))
+  floorRect.on('modified', () => handleFloorModified(floorRect))
+  // 바닥 클릭 시에도 즉시 레이어 정렬 유지
+  floorRect.on('mousedown', () => {
+    sendAllFloorsToBack()
+    positionGridAfterFloors()
   })
-  bottomWall.userData = { 
-    type: 'exterior-wall',
-    id: 'exterior-bottom-' + Date.now(),
-    position: 'bottom'
-  }
-  walls.push(bottomWall)
 
-  // 왼쪽 벽 (위 → 아래)
-  const leftWall = new fabric.Line([startX, startY, startX, startY + roomHeightPx], {
-    stroke: '#666666', // 더 진한 회색
-    strokeWidth: wallThickness,
-    selectable: true,
-    evented: true,
-    opacity: 1,
-    hoverCursor: 'move',
-    moveCursor: 'move'
-  })
-  leftWall.userData = { 
-    type: 'exterior-wall',
-    id: 'exterior-left-' + Date.now(),
-    position: 'left'
-  }
-  walls.push(leftWall)
+  // 레이어: 바닥은 항상 가장 뒤로
+  sendAllFloorsToBack()
+  // 그리드를 바닥 위로 정렬
+  positionGridAfterFloors()
 
-  // 오른쪽 벽 (위 → 아래)
-  const rightWall = new fabric.Line([startX + roomWidthPx, startY, startX + roomWidthPx, startY + roomHeightPx], {
-    stroke: '#666666', // 더 진한 회색
-    strokeWidth: wallThickness,
-    selectable: true,
-    evented: true,
-    opacity: 1,
-    hoverCursor: 'move',
-    moveCursor: 'move'
-  })
-  rightWall.userData = { 
-    type: 'exterior-wall',
-    id: 'exterior-right-' + Date.now(),
-    position: 'right'
-  }
-  walls.push(rightWall)
-
-  // 캔버스에 추가 (바닥 제거됨)
-  walls.forEach((wall: any) => fabricCanvas.add(wall))
-
-  // Store에 룸 정보 업데이트
+  // Store에 룸 정보 업데이트 (bounds는 그대로 유지)
   const roomData = {
     width: roomWidth.value,
     height: roomHeight.value,
@@ -917,52 +922,87 @@ const createRoom = () => {
       bottom: startY + roomHeightPx
     }
   }
-
   floorplanStore.setRoom(roomData)
-  
-  // Store에 외부벽들도 추가
-  floorplanStore.clearExteriorWalls() // 기존 외부벽 제거
-  
-  // 외부벽 데이터를 Line 형태로 변환하여 Store에 저장 (실제 Line 좌표 사용)
-  const exteriorWallData = [
-    { // 위쪽 벽
-      start: { x: startX, y: startY },
-      end: { x: startX + roomWidthPx, y: startY },
-      id: topWall.userData.id
-    },
-    { // 아래쪽 벽  
-      start: { x: startX, y: startY + roomHeightPx },
-      end: { x: startX + roomWidthPx, y: startY + roomHeightPx },
-      id: bottomWall.userData.id
-    },
-    { // 왼쪽 벽
-      start: { x: startX, y: startY },
-      end: { x: startX, y: startY + roomHeightPx },
-      id: leftWall.userData.id
-    },
-    { // 오른쪽 벽
-      start: { x: startX + roomWidthPx, y: startY },
-      end: { x: startX + roomWidthPx, y: startY + roomHeightPx },
-      id: rightWall.userData.id
-    }
-  ]
-  
-  exteriorWallData.forEach(wallData => {
-    floorplanStore.addExteriorWall(wallData)
+
+  // Store floors에도 추가 (여러 바닥 지원)
+  floorplanStore.addFloor({
+    id: floorId,
+    width: roomWidth.value,
+    height: roomHeight.value,
+    boundsPx: { left: startX, top: startY, right: startX + roomWidthPx, bottom: startY + roomHeightPx },
+    color: selectedFloorColor.value
   })
 
+  // 외부벽 데이터는 생성하지 않음 (요청사항)
+
   fabricCanvas.renderAll()
-  
-  // 외부벽에도 길이 표시 추가 (Line 좌표 사용)
-  setTimeout(() => {
-    addWallLengthLabel(topWall, { x: startX, y: startY }, { x: startX + roomWidthPx, y: startY })
-    addWallLengthLabel(bottomWall, { x: startX, y: startY + roomHeightPx }, { x: startX + roomWidthPx, y: startY + roomHeightPx })
-    addWallLengthLabel(leftWall, { x: startX, y: startY }, { x: startX, y: startY + roomHeightPx })
-    addWallLengthLabel(rightWall, { x: startX + roomWidthPx, y: startY }, { x: startX + roomWidthPx, y: startY + roomHeightPx })
-    fabricCanvas.renderAll()
-    
-    floorplanStore.logCurrentState()
-  }, 100)
+}
+
+// 바닥 사이즈 라벨 생성/업데이트
+const addOrUpdateRoomSizeLabel = (floorRect: any) => {
+  if (!fabricCanvas) return
+  const scale = 40
+  const widthM = (floorRect.width * floorRect.scaleX) / scale
+  const heightM = (floorRect.height * floorRect.scaleY) / scale
+  const area = Math.round(widthM * heightM * 100) / 100
+  const labelText = `W ${widthM.toFixed(2)}m × D ${heightM.toFixed(2)}m  |  Area ${area.toFixed(2)} m²`
+
+  // 기존 라벨 찾기
+  const existing = fabricCanvas.getObjects().find((o: any) => o.userData?.type === 'room-size-label') as any
+  if (existing) {
+    existing.text = labelText
+    existing.left = floorRect.left + 8
+    existing.top = floorRect.top + 8
+    existing.bringToFront()
+  } else {
+    const label = new fabric.Text(labelText, {
+      left: floorRect.left + 8,
+      top: floorRect.top + 8,
+      fontSize: 14,
+      fill: '#5c5c5c',
+      backgroundColor: 'rgba(255,255,255,0.6)'
+    }) as any
+    label.userData = { type: 'room-size-label' }
+    fabricCanvas.add(label)
+    label.bringToFront()
+  }
+}
+
+// 바닥 이동/리사이즈 후 스토어 바닥/라벨만 업데이트 (다른 요소 영향 없음)
+const handleFloorModified = (floorRect: any) => {
+  if (!fabricCanvas) return
+  const scale = 40
+
+  // 변경된 실제 크기 픽셀 → 고정 폭/높이로 반영하고 scale 초기화
+  const newWidthPx = floorRect.getScaledWidth()
+  const newHeightPx = floorRect.getScaledHeight()
+  floorRect.set({ width: newWidthPx, height: newHeightPx, scaleX: 1, scaleY: 1 })
+
+  // 새로운 룸 크기 (미터)
+  const newWm = newWidthPx / scale
+  const newDm = newHeightPx / scale
+
+  // floors 스토어 업데이트 (현재 floorId 기준)
+  const floorId = floorRect.userData?.floorId as string
+  if (floorId) {
+    floorplanStore.updateFloor(floorId, {
+      width: newWm,
+      height: newDm,
+      boundsPx: {
+        left: floorRect.left,
+        top: floorRect.top,
+        right: floorRect.left + newWidthPx,
+        bottom: floorRect.top + newHeightPx
+      }
+    })
+  }
+
+  // 라벨 업데이트
+  addOrUpdateRoomSizeLabel(floorRect)
+
+  // 다른 요소에는 영향 없음. 2D 재구성 불필요
+
+  fabricCanvas.renderAll()
 }
 
 // 실시간 3D 업데이트 제거로 인해 updateAllWalls 함수 비활성화
@@ -1180,7 +1220,7 @@ const rerender2DObjectsFromStore = () => {
   console.log('🔄 2D Store 기반 재구성 시작')
   
   // 기존 배치 오브젝트 모두 제거
-  const objectsToRemove = fabricCanvas.getObjects().filter((obj: any) => 
+  const objectsToRemove = (fabricCanvas.getObjects() as Array<fabric.Object & { userData?: any }>).filter((obj) => 
     obj.userData?.type === 'placed-object'
   )
   
