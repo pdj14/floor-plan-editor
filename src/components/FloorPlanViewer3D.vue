@@ -1287,9 +1287,21 @@ const createInstancedObjectsFromGLB = async (instancedObjects: any[]) => {
 
       // 지오메트리와 머티리얼 복제 (인스턴싱용)
       const instancedGeometry = sourceMesh.geometry.clone()
-      const instancedMaterial = Array.isArray(sourceMesh.material)
-        ? sourceMesh.material[0].clone()
+      let instancedMaterial: THREE.Material = Array.isArray(sourceMesh.material)
+        ? (sourceMesh.material[0] as THREE.Material).clone()
         : (sourceMesh.material as THREE.Material).clone()
+
+      // LOD 모드일 경우, 통일된 회색 머티리얼 적용
+      if (lodEnabled.value) {
+        if ('dispose' in instancedMaterial) {
+          instancedMaterial.dispose()
+        }
+        instancedMaterial = new THREE.MeshStandardMaterial({
+          color: getLODColor(),
+          roughness: 0.5,
+          metalness: 0.0
+        })
+      }
 
       const mesh = new THREE.InstancedMesh(
         instancedGeometry,
@@ -1388,6 +1400,11 @@ const createInstancedObjects = (instancedObjects: any[]) => {
     instancedCubeMaterial,
     instancedObjects.length
   )
+  // LOD 모드일 경우 폴백 큐브도 동일한 회색 적용
+  if (lodEnabled.value && instancedCubeMaterial) {
+    instancedCubeMaterial.color = new THREE.Color(getLODColor())
+    instancedCubeMaterial.needsUpdate = true
+  }
   
   // 각 오브젝트의 변환 행렬 설정
   instancedObjects.forEach((obj, index) => {
