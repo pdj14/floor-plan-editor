@@ -1111,6 +1111,11 @@ const updateWallSelectability = () => {
     if (obj.userData?.type === 'interior-wall' || obj.userData?.type === 'exterior-wall') {
       obj.selectable = isSelectMode
       obj.evented = isSelectMode
+      obj.lockMovementX = !isSelectMode
+      obj.lockMovementY = !isSelectMode
+      obj.lockScalingX = !isSelectMode
+      obj.lockScalingY = !isSelectMode
+      obj.lockRotation = !isSelectMode
       
       // 시각적 피드백: Draw 모드에서는 약간 투명하게, Select 모드에서는 정상
       if (isSelectMode) {
@@ -1133,14 +1138,31 @@ const updateWallSelectability = () => {
         obj.moveCursor = 'default'
       }
     }
-    
-    // 배치된 오브젝트 처리 - 항상 선택 가능
+    // 배치된 오브젝트 처리 - Draw 모드에서는 비활성화
     if (obj.userData?.type === 'placed-object') {
-      obj.selectable = true
-      obj.evented = true
+      obj.selectable = isSelectMode
+      obj.evented = isSelectMode
+      obj.lockMovementX = !isSelectMode
+      obj.lockMovementY = !isSelectMode
+      obj.lockScalingX = !isSelectMode
+      obj.lockScalingY = !isSelectMode
+      obj.lockRotation = !isSelectMode
       obj.opacity = 1.0
-      obj.hoverCursor = 'move'
-      obj.moveCursor = 'move'
+      obj.hoverCursor = isSelectMode ? 'move' : 'default'
+      obj.moveCursor = isSelectMode ? 'move' : 'default'
+    }
+
+    // 바닥(플로어) 처리 - Draw 모드에서는 비활성화
+    if (obj.userData?.type === 'room-floor') {
+      obj.selectable = isSelectMode
+      obj.evented = isSelectMode
+      obj.lockMovementX = !isSelectMode
+      obj.lockMovementY = !isSelectMode
+      obj.lockScalingX = !isSelectMode
+      obj.lockScalingY = !isSelectMode
+      obj.lockRotation = true
+      obj.hoverCursor = isSelectMode ? 'move' : 'default'
+      obj.moveCursor = isSelectMode ? 'move' : 'default'
     }
     
 
